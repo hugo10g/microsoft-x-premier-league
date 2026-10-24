@@ -1,0 +1,8 @@
+# Secrets never enter the image: credentials are run-time environment variables.
+.env
+.git
+.venv
+__pycache__
+.pytest_cache
+.DS_Store
+outputs

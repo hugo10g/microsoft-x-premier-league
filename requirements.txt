@@ -1,0 +1,11 @@
+# Pinned to the versions the tests and dashboard were verified with (Python 3.13).
+numpy==2.5.4
+scipy==1.18.1
+pandas==3.1.0
+streamlit==1.66.1
+plotly==7.1.0
+scikit-learn==1.9.1
+openai==3.37.0
+agent-framework-core==1.23.0
+agent-framework-openai==1.17.0
+pytest==9.1.1

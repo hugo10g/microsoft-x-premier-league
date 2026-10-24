@@ -1,0 +1,42 @@
+{
+  "group_by": ["season", "broad_position"],
+  "exclude_positions": ["Goalkeeper"],
+  "min_minutes": 90,
+  "min_coverage": 0.5,
+  "categories": {
+    "spacing": {
+      "label": "Spacing", "weight": 1,
+      "metrics": {
+        "pitch_control_pct":     {"weight": 1, "higher_is_better": true, "sample": "minutes",    "min_sample": 90},
+        "receipts_in_space_pct": {"weight": 1, "higher_is_better": true, "sample": "receptions", "min_sample": 10}
+      }
+    },
+    "movement": {
+      "label": "Movement", "weight": 1,
+      "metrics": {
+        "decoy_p90":        {"weight": 1, "higher_is_better": true, "sample": "minutes",     "min_sample": 90},
+        "transition_score": {"weight": 1, "higher_is_better": true, "sample": "transitions", "min_sample": 10}
+      }
+    },
+    "creation": {
+      "label": "Creation", "weight": 1,
+      "metrics": {
+        "obso_p90": {"weight": 1, "higher_is_better": true, "sample": "minutes", "min_sample": 90}
+      }
+    },
+    "scanning": {
+      "label": "Scanning", "weight": 1,
+      "metrics": {
+        "scan_rate": {"weight": 1, "higher_is_better": true, "sample": "receptions", "min_sample": 10}
+      }
+    },
+    "defence": {
+      "label": "Defence", "weight": 1,
+      "metrics": {
+        "lane_cut_p90":           {"weight": 1, "higher_is_better": true,  "sample": "minutes", "min_sample": 90},
+        "pressure_intensity":     {"weight": 1, "higher_is_better": true,  "sample": "minutes", "min_sample": 90},
+        "def_responsibility_p90": {"weight": 1, "higher_is_better": false, "sample": "minutes", "min_sample": 90}
+      }
+    }
+  }
+}

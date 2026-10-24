@@ -1,0 +1,387 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #0f1a14; --panel: #17251d; --line: #2b4134; --text: #e9f0ea; --muted: #9fb5a7;
+    --accent: #ffd23f; --cut: #ff2e88;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: transparent; color: var(--text);
+         font: 13px/1.4 "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { max-width: 1040px; margin: 0 auto; background: var(--bg); border-radius: 12px; padding: 10px 12px 12px; }
+  #teams { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; gap: 8px; }
+  .team { display: flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: .02em; }
+  .chip { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; }
+  #status { color: var(--muted); font-variant-numeric: tabular-nums; text-align: center; flex: 1; }
+  canvas { width: 100%; display: block; border-radius: 8px; outline: none; }
+  .row { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  button { background: var(--accent); color: #111; border: 0; border-radius: 7px; padding: 7px 16px;
+           font: 700 13px/1 inherit; cursor: pointer; min-width: 92px; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .clock { font: 700 18px/1 "JetBrains Mono", ui-monospace, Menlo, monospace; min-width: 74px; }
+  input[type=range] { flex: 1; min-width: 160px; accent-color: var(--accent); }
+  select { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+  label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .muted { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="teams">
+    <span class="team" id="home"></span><span id="status"></span><span class="team" id="away"></span>
+  </div>
+  <canvas id="pitch" tabindex="0" aria-label="Pitch playback. Space plays and pauses, arrow keys step a frame, Shift+arrow a second."></canvas>
+  <div class="row">
+    <button id="play">▶ Play</button>
+    <span class="clock" id="clock">00:00</span>
+    <input type="range" id="scrub" min="0" step="1" value="0" aria-label="Timeline">
+    <select id="speed" aria-label="Playback speed">
+      <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option><option value="2">2×</option>
+    </select>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="names" checked> Names</label>
+    <label><input type="checkbox" id="shadows" checked> Cover shadows &amp; cut lanes</label>
+    <label id="head-toggle" hidden><input type="checkbox" id="head"> Head direction</label>
+    <label>Analytics overlay
+      <select id="overlay"><option value="none">Off</option>
+        <option value="control">Pitch control</option><option value="xt">xT grid</option></select>
+    </label>
+    <span class="muted" id="hint"></span>
+  </div>
+</div>
+<script>
+const D = __DATA__;
+const L = D.pitch.length, W = D.pitch.width, MARGIN = 3, R = 1.25;   // metres
+const P = D.players.length, F = D.frames;
+const HAS_HEAD = Array.isArray(D.head) && D.head.some(v => v !== null);
+const CONE_HALF = 25 * Math.PI / 180, CONE_LEN = 5;                  // vision cone: half-angle, metres
+const canvas = document.getElementById("pitch"), ctx = canvas.getContext("2d");
+const ui = id => document.getElementById(id);
+let scale = 1, playing = false, frame = D.start, lastTs = null, overlayImage = null, overlayFrame = -1;
+
+// ── Geometry helpers ─────────────────────────────────────────────────────────
+const X = x => (x + MARGIN) * scale;
+const Y = y => (W - y + MARGIN) * scale;                    // pitch y points up, canvas y down
+const val = (arr, i, k) => arr[i * 2 + k];
+
+function pos(arr, f, p) {
+  // Linear interpolation between 25 Hz frames, so playback is smooth at any refresh rate.
+  const i = Math.floor(f), t = f - i, j = Math.min(i + 1, F - 1);
+  const a = (i * P + p), b = (j * P + p);
+  const ax = val(arr, a, 0), ay = val(arr, a, 1), bx = val(arr, b, 0), by = val(arr, b, 1);
+  if (ax === null) return null;
+  if (bx === null) return [ax, ay];
+  return [ax + (bx - ax) * t, ay + (by - ay) * t];
+}
+function ballAt(f) {
+  const i = Math.floor(f), t = f - i, j = Math.min(i + 1, F - 1);
+  const ax = D.ball[i * 2], ay = D.ball[i * 2 + 1], bx = D.ball[j * 2], by = D.ball[j * 2 + 1];
+  if (ax === null) return null;
+  if (bx === null) return [ax, ay];
+  return [ax + (bx - ax) * t, ay + (by - ay) * t];
+}
+function headAt(f, p) {
+  // Head yaw in radians, interpolated along the shorter arc (179° → -179° turns 2°, not 358°).
+  const i = Math.floor(f), t = f - i, j = Math.min(i + 1, F - 1);
+  const a = D.head[i * P + p], b = D.head[j * P + p];
+  if (a === null || a === undefined) return null;
+  const d = b === null || b === undefined ? 0 : ((b - a + 540) % 360) - 180;
+  return (a + d * t) * Math.PI / 180;
+}
+function clockText(f) {
+  const m = D.minute[Math.floor(f)], whole = Math.floor(m), s = Math.floor((m - whole) * 60);
+  return `${String(whole).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+function hexToRgb(hex) { const n = parseInt(hex.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function textOn(hex) { const [r, g, b] = hexToRgb(hex); return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#111" : "#fff"; }
+
+// ── Pitch ────────────────────────────────────────────────────────────────────
+function drawGrass() {
+  ctx.fillStyle = "#24622b";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const stripes = 14, w = L / stripes;
+  for (let k = 0; k < stripes; k++) {
+    ctx.fillStyle = k % 2 ? "#3b8a3f" : "#347d38";
+    ctx.fillRect(X(k * w), Y(W + MARGIN), w * scale + 1, (W + 2 * MARGIN) * scale);
+  }
+}
+function drawMarkings() {
+  ctx.save();
+  ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = Math.max(1.5, 0.12 * scale);
+  const rect = (x0, y0, x1, y1) => ctx.strokeRect(X(Math.min(x0, x1)), Y(Math.max(y0, y1)),
+                                                Math.abs(x1 - x0) * scale, Math.abs(y1 - y0) * scale);
+  rect(0, 0, L, W);
+  ctx.beginPath(); ctx.moveTo(X(L / 2), Y(0)); ctx.lineTo(X(L / 2), Y(W)); ctx.stroke();
+  ctx.beginPath(); ctx.arc(X(L / 2), Y(W / 2), 9.15 * scale, 0, 2 * Math.PI); ctx.stroke();
+  for (const [g, s] of [[0, 1], [L, -1]]) {
+    rect(g, W / 2 - 20.16, g + s * 16.5, W / 2 + 20.16);
+    rect(g, W / 2 - 9.16, g + s * 5.5, W / 2 + 9.16);
+    rect(g, W / 2 - 3.66, g - s * 1.8, W / 2 + 3.66);
+    const a = Math.acos(5.5 / 9.15);                         // the arc outside the box
+    ctx.beginPath();
+    if (s > 0) ctx.arc(X(g + 11), Y(W / 2), 9.15 * scale, -a, a);
+    else ctx.arc(X(g - 11), Y(W / 2), 9.15 * scale, Math.PI - a, Math.PI + a);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.9)";
+  for (const [x, y] of [[L / 2, W / 2], [11, W / 2], [L - 11, W / 2]]) {
+    ctx.beginPath(); ctx.arc(X(x), Y(y), 0.35 * scale, 0, 2 * Math.PI); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ── Analytics overlays (paused frames only) ─────────────────────────────────
+function attackingTeam(f) { return D.possession[Math.floor(f)] || "Home"; }
+
+function controlImage(f) {
+  // Soft-Voronoi pitch control, the same model as core.spatial.attacking_control.
+  const nx = Math.round(L), ny = Math.round(W), att = attackingTeam(f);
+  const atts = [], defs = [];
+  for (let p = 0; p < P; p++) {
+    const q = pos(D.positions, f, p);
+    if (q) (D.players[p].team === att ? atts : defs).push(q);
+  }
+  const off = document.createElement("canvas"); off.width = nx; off.height = ny;
+  const octx = off.getContext("2d"), img = octx.createImageData(nx, ny);
+  const home = hexToRgb(D.teams.Home.colour), away = hexToRgb(D.teams.Away.colour);
+  const nearest = (list, x, y) => list.reduce((m, q) => Math.min(m, Math.hypot(q[0] - x, q[1] - y)), Infinity);
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const x = (i + 0.5) * L / nx, y = W - (j + 0.5) * W / ny;
+      const pAtt = 1 / (1 + Math.exp(-(nearest(defs, x, y) - nearest(atts, x, y)) / D.softness));
+      const pHome = att === "Home" ? pAtt : 1 - pAtt;
+      const c = pHome >= 0.5 ? home : away, k = (j * nx + i) * 4;
+      img.data[k] = c[0]; img.data[k + 1] = c[1]; img.data[k + 2] = c[2];
+      img.data[k + 3] = Math.round(Math.abs(pHome - 0.5) * 2 * 150);
+    }
+  }
+  octx.putImageData(img, 0, 0);
+  return off;
+}
+function drawOverlay(f) {
+  const kind = ui("overlay").value;
+  if (kind === "none" || playing) return;
+  if (kind === "control") {
+    if (overlayFrame !== Math.floor(f) || !overlayImage) { overlayImage = controlImage(f); overlayFrame = Math.floor(f); }
+    ctx.save(); ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(overlayImage, X(0), Y(W), L * scale, W * scale); ctx.restore();
+  } else {
+    const team = attackingTeam(f), grid = D.xt[team], ny = grid.length, nx = grid[0].length;
+    const top = Math.max(...grid.flat());
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      // Square root: a few box cells hold most of the threat, so a linear scale hides the rest.
+      const v = Math.sqrt(grid[j][i] / (top || 1));
+      ctx.fillStyle = `rgba(255, 236, 160, ${0.05 + 0.6 * v})`;
+      ctx.fillRect(X(i * L / nx) + 0.5, Y((j + 1) * W / ny) + 0.5, L / nx * scale - 1, W / ny * scale - 1);
+    }
+    banner(`xT for ${D.teams[team].name}, attacking ${D.attacks_right[team] ? "→" : "←"}`, 1);
+  }
+}
+
+// ── Cover shadows and passing lanes (from core.pillars.pressing) ─────────────
+function drawPress(f) {
+  if (!ui("shadows").checked) return;
+  const i = Math.floor(f), c = D.carrier[i];
+  if (c < 0) return;
+  const cp = pos(D.positions, f, c);
+  if (!cp) return;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(X(0), Y(W), L * scale, W * scale); ctx.clip();
+  for (const d of D.pressers[i]) {
+    const dp = pos(D.positions, f, d);
+    if (!dp) continue;
+    const dist = Math.max(Math.hypot(dp[0] - cp[0], dp[1] - cp[1]), D.reach);
+    const half = Math.atan(D.reach / dist), dir = Math.atan2(dp[1] - cp[1], dp[0] - cp[0]);
+    const pt = (r, a) => [X(cp[0] + r * Math.cos(a)), Y(cp[1] + r * Math.sin(a))];
+    ctx.fillStyle = "rgba(255,255,255,0.13)";
+    ctx.beginPath();
+    for (const [r, a] of [[dist, dir - half], [160, dir - half], [160, dir + half], [dist, dir + half]]) ctx.lineTo(...pt(r, a));
+    ctx.closePath(); ctx.fill();
+  }
+  const team = D.players[c].team, cut = new Set(D.cut[i]);
+  for (let p = 0; p < P; p++) {
+    if (p === c || D.players[p].team !== team) continue;
+    const q = pos(D.positions, f, p);
+    if (!q) continue;
+    const blocked = cut.has(p);
+    ctx.strokeStyle = blocked ? "rgba(255,46,136,0.95)" : "rgba(255,255,255,0.45)";
+    ctx.lineWidth = blocked ? 3 : 1.2;
+    ctx.setLineDash(blocked ? [] : [4, 5]);
+    ctx.beginPath(); ctx.moveTo(X(cp[0]), Y(cp[1])); ctx.lineTo(X(q[0]), Y(q[1])); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ── Head direction (vision cones; yellow while checking away from the ball) ──
+function drawHeads(f) {
+  if (!HAS_HEAD || !ui("head").checked) return;
+  const i = Math.floor(f), scanning = new Set((D.scanning && D.scanning[i]) || []);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(X(-MARGIN), Y(W + MARGIN), (L + 2 * MARGIN) * scale, (W + 2 * MARGIN) * scale); ctx.clip();
+  for (let p = 0; p < P; p++) {
+    const q = pos(D.positions, f, p), yaw = headAt(f, p);
+    if (!q || yaw === null) continue;
+    const cx = X(q[0]), cy = Y(q[1]), len = CONE_LEN * scale, check = scanning.has(p);
+    const g = ctx.createRadialGradient(cx, cy, R * scale, cx, cy, len);
+    g.addColorStop(0, check ? "rgba(255,210,63,0.78)" : "rgba(255,255,255,0.24)");
+    g.addColorStop(1, check ? "rgba(255,210,63,0.30)" : "rgba(255,255,255,0.02)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, len, -yaw - CONE_HALF, -yaw + CONE_HALF);          // canvas angles run clockwise
+    ctx.closePath(); ctx.fill();
+    if (check) { ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 1.5; ctx.stroke(); }
+  }
+  ctx.restore();
+}
+function drawEye(cx, cy, size) {
+  // Tiny almond eye with a pupil: marks a player mid head check.
+  ctx.save();
+  ctx.fillStyle = "#ffd23f"; ctx.strokeStyle = "#111"; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(cx - size, cy);
+  ctx.quadraticCurveTo(cx, cy - size * 1.1, cx + size, cy);
+  ctx.quadraticCurveTo(cx, cy + size * 1.1, cx - size, cy);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(cx, cy, size * 0.36, 0, 2 * Math.PI); ctx.fill();
+  ctx.restore();
+}
+
+// ── Players and ball ─────────────────────────────────────────────────────────
+function drawPlayers(f, now) {
+  const i = Math.floor(f), hl = D.highlight;
+  const eyes = HAS_HEAD && ui("head").checked ? new Set((D.scanning && D.scanning[i]) || []) : new Set();
+  for (let p = 0; p < P; p++) {
+    const q = pos(D.positions, f, p);
+    if (!q) continue;
+    const pl = D.players[p], colour = D.teams[pl.team].colour;
+    const hx = val(D.heading, i * P + p, 0), hy = val(D.heading, i * P + p, 1);
+    const speed = D.speed[i * P + p] || 0;
+    const cx = X(q[0]), cy = Y(q[1]), r = R * scale;
+
+    if (hl && hl.player === p && i >= hl.from && i <= hl.to) {         // key-moment player
+      ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, r + (0.7 + 0.25 * Math.sin(now / 160)) * scale, 0, 2 * Math.PI); ctx.stroke();
+    }
+    if (hx !== null) {                                                // facing / velocity cone
+      const len = (0.9 + Math.min(speed, 32) / 32 * 2.6) * scale;
+      const ux = hx, uy = -hy, px = -uy, py = ux;                     // canvas y is flipped
+      ctx.fillStyle = colour; ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(cx + ux * (r + len), cy + uy * (r + len));
+      ctx.lineTo(cx + ux * r * 0.55 + px * r * 0.62, cy + uy * r * 0.55 + py * r * 0.62);
+      ctx.lineTo(cx + ux * r * 0.55 - px * r * 0.62, cy + uy * r * 0.55 - py * r * 0.62);
+      ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
+    }
+    ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1;
+    ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(cx, cy, r, 0, 2 * Math.PI); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = textOn(colour);
+    ctx.font = `800 ${Math.round(r * 1.05)}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(pl.number, cx, cy + 0.5);
+    if (eyes.has(p)) drawEye(cx + r * 1.05, cy - r * 1.05, Math.max(5, 0.6 * scale));
+
+    if (ui("names").checked) {
+      const label = pl.name;
+      ctx.font = `600 ${Math.max(10, Math.round(0.85 * scale))}px Inter, system-ui, sans-serif`;
+      // A soft shadow keeps names readable on the grass; an outline (strokeText) draws
+      // black spikes at sharp letters like M and A.
+      ctx.shadowColor = "rgba(0,0,0,0.85)"; ctx.shadowBlur = 3; ctx.shadowOffsetY = 1;
+      ctx.fillStyle = "#fff"; ctx.fillText(label, cx, cy + r + 0.9 * scale);
+      ctx.shadowColor = "transparent"; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+    }
+  }
+}
+function drawBall(f) {
+  const b = ballAt(f);
+  if (!b) return;
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath(); ctx.ellipse(X(b[0]) + 2, Y(b[1]) + 3, 0.5 * scale, 0.32 * scale, 0, 0, 2 * Math.PI); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.strokeStyle = "#111"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(X(b[0]), Y(b[1]), 0.5 * scale, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+}
+function banner(text, slot) {
+  ctx.font = "700 13px Inter, system-ui, sans-serif"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+  const w = ctx.measureText(text).width + 16, y = 8 + slot * 28;
+  ctx.fillStyle = "rgba(10,18,13,0.78)"; ctx.fillRect(8, y, w, 24);
+  ctx.fillStyle = "#fff"; ctx.fillText(text, 16, y + 5);
+}
+
+// ── Frame ────────────────────────────────────────────────────────────────────
+function draw(now = performance.now()) {
+  drawGrass();
+  drawOverlay(frame);
+  drawMarkings();
+  drawHeads(frame);                                          // under the lanes, so cut lanes stay legible
+  drawPress(frame);
+  drawPlayers(frame, now);
+  drawBall(frame);
+  const i = Math.floor(frame), hl = D.highlight;
+  if (hl && i >= hl.from && i <= hl.to) banner(`★ ${hl.label}`, 0);
+  const owner = D.possession[i], c = D.carrier[i];
+  ui("status").textContent = owner
+    ? `${D.teams[owner].name} in possession${c >= 0 ? " · ball: " + D.players[c].name : ""}`
+    : "Ball out of play";
+  ui("clock").textContent = clockText(frame);
+  ui("scrub").value = i;
+  const hints = [];
+  if (HAS_HEAD && ui("head").checked) hints.push("yellow cone = head check");
+  if (playing && ui("overlay").value !== "none") hints.push("Pause to show the overlay");
+  ui("hint").textContent = hints.join(" · ");
+}
+function tick(ts) {
+  if (!playing) return;
+  if (lastTs !== null) frame += (ts - lastTs) / 1000 * D.fps * parseFloat(ui("speed").value);
+  lastTs = ts;
+  if (frame >= F - 1) { frame = F - 1; setPlaying(false); return; }
+  draw(ts);
+  requestAnimationFrame(tick);
+}
+function setPlaying(on) {
+  playing = on; lastTs = null;
+  ui("play").textContent = on ? "❚❚ Pause" : "▶ Play";
+  if (on) { if (frame >= F - 1) frame = 0; requestAnimationFrame(tick); } else draw();
+}
+function resize() {
+  const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth;
+  scale = w / (L + 2 * MARGIN);
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round((W + 2 * MARGIN) * scale * dpr);
+  canvas.style.height = `${(W + 2 * MARGIN) * scale}px`;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  overlayImage = null; draw();
+}
+
+// ── Wiring ───────────────────────────────────────────────────────────────────
+for (const side of ["Home", "Away"]) {
+  // Built with DOM nodes, not innerHTML: team names come from scraped data.
+  const t = D.teams[side], chip = document.createElement("span"), name = document.createElement("span");
+  chip.className = "chip"; chip.style.background = t.colour; name.textContent = t.name;
+  ui(side.toLowerCase()).append(...(side === "Home" ? [chip, name] : [name, chip]));
+}
+ui("scrub").max = F - 1;
+ui("head-toggle").hidden = !HAS_HEAD;
+ui("head").checked = HAS_HEAD;
+ui("play").onclick = () => setPlaying(!playing);
+ui("scrub").oninput = e => { frame = +e.target.value; if (playing) setPlaying(false); else draw(); };
+for (const id of ["names", "shadows", "head", "overlay"]) ui(id).onchange = () => { overlayImage = null; draw(); };
+canvas.onkeydown = e => {
+  if (e.code === "Space") { e.preventDefault(); setPlaying(!playing); }
+  if (e.code === "ArrowRight" || e.code === "ArrowLeft") {
+    e.preventDefault(); if (playing) setPlaying(false);
+    const step = (e.shiftKey ? D.fps : 1) * (e.code === "ArrowRight" ? 1 : -1);   // Shift: one second
+    frame = Math.max(0, Math.min(F - 1, Math.floor(frame) + step));
+    draw();
+  }
+};
+new ResizeObserver(resize).observe(canvas);
+resize();
+if (D.autoplay) setPlaying(true);
+</script>
+</body>
+</html>
