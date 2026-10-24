@@ -8,7 +8,7 @@ Event data records the pass, the shot and the tackle. It misses the run that dra
 - it prices players against their off-ball contribution;
 - a team of AI agents writes match reports that are fact-checked against the data.
 
-> **All data is synthetic.** The league, clubs, players, market values and matches are fictional, simulated by `core/synthetic.py` at 25 Hz with a head-orientation feed. The matches follow the laws of the game: fouls, yellow cards, free kicks, penalties, offside and corners, at Premier League rates. No real match data, names or trademarks are used anywhere.
+> **All data is synthetic.** The league, clubs, players, market values and matches are fictional, simulated by `core/synthetic.py` at 25 Hz with a head-orientation feed. The matches follow the laws of the game (fouls, yellow cards, free kicks, penalties, offside, corners, blocked shots, keepers diving and guessing a side at penalties) at Premier League rates, players keep their own space instead of overlapping, with about 64 minutes of the ball in play. No real match data, names or trademarks are used anywhere.
 
 ## What it does
 
@@ -18,7 +18,7 @@ Event data records the pass, the shot and the tackle. It misses the run that dra
 | **Match Leaderboards** | Every player in the match ranked, with the team battle, intensity by 15-minute block and a timeline of key moments. |
 | **Match Report** | A report written by four agents and checked against the match facts. Every cited moment can be watched in the playback. |
 | **Off-Ball Index** | Two 0–100 composite scores with rankings and radar polygons. The **Off-Ball Index** gives equal weight to ten metrics in five categories. The **Off-Ball Impact Index** weights the five tactical metrics by how much they move the team's shot balance. |
-| **Player Profile** | One player against their position: index, polygon, pillar percentiles, match-by-match trend and the most similar players. |
+| **Player Profile** | One player against their position: index, polygon, pillar percentiles, match-by-match trend, a step-by-step breakdown of their ML price with the model's formula, and the most similar players. |
 | **Value Finder** | Market value against off-ball work: a "Moneyball" quadrant and an out-of-fold ML price. |
 | **AI Scout** | Plain-language questions about the league's off-ball work, answered from the same numbers. |
 | **Model Check** | Whether the metrics recover the hidden talents the simulator gave each player. |
@@ -94,14 +94,14 @@ The simulator gives every player hidden talents that the metrics never see. The 
 | Check | ρ |
 |---|---|
 | Scan rate vs awareness | 0.87 |
-| Transition reaction vs work rate | 0.83 |
-| Transition latency vs work rate | −0.83 |
-| Lane cuts vs pressing | 0.59 |
-| Decoy runs vs work rate | 0.29 (carried by forwards at 0.85; midfielders' decoy value doesn't yet track work rate) |
-| Off-Ball Index vs combined off-ball talents | 0.57 |
-| Pressures won vs pressing | 0.48 |
+| Transition reaction vs work rate | 0.76 |
+| Transition latency vs work rate | −0.66 |
+| Lane cuts vs pressing | 0.54 |
+| Decoy runs vs work rate | 0.27 (carried by forwards at 0.80; midfielders' decoy value doesn't yet track work rate) |
+| Off-Ball Index vs combined off-ball talents | 0.54 |
+| Pressures won vs pressing | 0.45 |
 
-Receivers who made no head check kept the ball 71% of the time, against 82% with 3+ checks (7,837 receptions).
+Receivers who made no head check kept the ball 75% of the time, against 83% with 3+ checks (7,636 receptions).
 
 ## Run it locally
 

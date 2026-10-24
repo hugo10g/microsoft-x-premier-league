@@ -6,6 +6,8 @@ Machine learning on the aggregated off-ball metrics: a market-value model and ro
                             prices differ by position). Predictions are out-of-fold: each
                             player is priced by a model that never saw them, so "predicted
                             vs actual" is an honest comparison, not memorised prices.
+    price_steps             how one player's price is built: a typical player in their
+                            position, then each of their off-ball numbers in turn
 
 On the synthetic league, off-ball metrics alone explain almost none of the price
 (cross-validated R^2 around 0): value is driven mostly by finishing, passing, speed
@@ -43,6 +45,10 @@ FEATURES = {
     "pitch_control_pct": "Pitch Control %",
     "scan_rate": "Scanning rate (scans/s before receiving)",
 }
+# Short display names (chart axes) for the same features.
+SHORT_NAMES = {"Decoy Run Value /90": "Decoy runs", "Pressing Lane Cuts /90": "Lane cuts",
+               "Transition Latency": "Transition latency", "Pitch Control %": "Pitch control",
+               "Scanning rate (scans/s before receiving)": "Scanning"}
 # Role names for a cluster that stands out on each feature (latency: by being *low*).
 ROLES = {
     "decoy_p90": "Space creator",
@@ -80,25 +86,32 @@ def train_valuation_model(global_df: pd.DataFrame, target: str = "market_value_m
                           seed: int = 0, include_position: bool = True):
     """Predict market value from off-ball metrics. Returns (model, df with 'Predicted_Value').
 
-    The model learns log(value): prices are heavily right-skewed. 'Predicted_Value' (€m)
-    is out-of-fold. The returned model is refitted on every player, for scoring new
-    ones. Cross-validated diagnostics are in df.attrs["valuation"]: engine, features,
-    r2 (in log space, against always predicting the average), mae_m (€m) and the
-    feature importances.
+    The model learns log(value): prices are heavily right-skewed, so
+
+        ln(price) = c + Σ_t learning_rate · tree_t(x),   price = e^ln(price)
+
+    with x the off-ball features and one-hot position. 'Predicted_Value' (€m) is
+    out-of-fold and 'Price_Fold' says which fold's model priced each player. The returned
+    model is refitted on every player, for scoring new ones. Cross-validated diagnostics
+    are in df.attrs["valuation"]: engine, features, r2 (in log space, against always
+    predicting the average), mae_m (€m), the feature importances, the fold models and
+    the tree settings (trees, learning_rate, leaves).
     """
     df = global_df.copy()
     X = design_matrix(df, include_position)
     y = np.log(df[target].astype(float))
-    oof = np.full(len(df), np.nan)
+    oof, fold_of, fold_models = np.full(len(df), np.nan), np.zeros(len(df), dtype=int), []
     splits = KFold(n_splits=min(folds, len(df)), shuffle=True, random_state=seed)
-    for train, test in splits.split(X):
+    for fold, (train, test) in enumerate(splits.split(X)):
         model = _regressor(seed)
         model.fit(X.iloc[train], y.iloc[train])
-        oof[test] = model.predict(X.iloc[test])
+        oof[test], fold_of[test] = model.predict(X.iloc[test]), fold
+        fold_models.append(model)
     model = _regressor(seed)
     model.fit(X, y)
 
     df["Predicted_Value"] = np.round(np.exp(oof), 1)
+    df["Price_Fold"] = fold_of
     importances = getattr(model, "feature_importances_", None)
     df.attrs["valuation"] = {
         "engine": ENGINE,
@@ -106,8 +119,32 @@ def train_valuation_model(global_df: pd.DataFrame, target: str = "market_value_m
         "mae_m": float(mean_absolute_error(df[target], df["Predicted_Value"])),
         "features": list(X.columns),
         "importance": dict(zip(X.columns, importances.tolist())) if importances is not None else None,
+        "fold_models": fold_models, "trees": int(model.n_iter_), "learning_rate": model.learning_rate,
+        "leaves": model.max_leaf_nodes,
     }
     return model, df
+
+
+def price_steps(model, X: pd.DataFrame, row: int) -> list[tuple[str, float]]:
+    """How `model` prices player `row` of the design matrix X, as (label, price €m) steps.
+
+    The first step prices a typical player in the same position (every off-ball feature
+    at the pool's median); each next one switches one feature to the player's own value,
+    in X's column order, and the last is the player's price. The steps add up exactly,
+    but the share each feature gets depends on that order: trees combine features.
+    """
+    player = X.iloc[[row]]
+    position = [c for c in X.columns if c.startswith("Position_")]
+    current = player.copy()
+    off_ball = [c for c in X.columns if c not in position]
+    current[off_ball] = X[off_ball].median().to_numpy()
+    price = lambda x: float(np.exp(model.predict(x))[0])
+    steps = [("Typical " + next((c.removeprefix("Position_") for c in position if player[c].iloc[0] == 1), "player"),
+              price(current))]
+    for column in off_ball:
+        current[column] = player[column].to_numpy()
+        steps.append((column, price(current)))
+    return steps
 
 
 def role_names(centres: pd.DataFrame) -> dict[int, str]:

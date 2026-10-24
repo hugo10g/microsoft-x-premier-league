@@ -892,7 +892,7 @@ RUN_LABELS = {"runs_in_behind_p90": "runs in behind", "pulling_wide_p90": "pulli
               "dropping_deep_p90": "dropping deep"}
 
 if page == "Player Profile":
-    pool, _, _ = value_models(signature, SCOUT_POOL_MINUTES, False)
+    pool, valuation, _ = value_models(signature, SCOUT_POOL_MINUTES, False)
     if pool.empty:
         st.info("No outfielders with enough minutes to profile.")
     else:
@@ -949,6 +949,39 @@ if page == "Player Profile":
         matches = per_match(signature)
         st.plotly_chart(charts.match_trend(matches[matches["name"] == chosen], pillar, PILLAR_LABELS[pillar],
                                               benchmark=float(peers[pillar].median())), key="profile-trend")
+        st.subheader(f"How the ML price of €{row['Predicted_Value']:.1f}m is calculated")
+        if valuation is None:
+            st.info("Too few players to train the valuation model.")
+        else:
+            X = ml_model.design_matrix(pool)
+            at = pool.index.get_loc(row.name)
+            steps = ml_model.price_steps(valuation["fold_models"][int(row["Price_Fold"])], X, at)
+            left, right = st.columns([3, 2])
+            steps = [(ml_model.SHORT_NAMES.get(label, label), price) for label, price in steps]
+            left.plotly_chart(charts.price_waterfall(steps, f"{chosen}: how the ML price is built"),
+                              key="profile-price")
+            left.caption("The first bar prices a typical player in the same position (every off-ball number at "
+                         "the league median); each next bar swaps in one of this player's own numbers. The bars "
+                         "add up exactly, but how a change is shared out depends on the order, because the trees "
+                         "combine features.")
+            with right:
+                st.markdown("**The formula.** A gradient-boosted tree model learns the *logarithm* of market "
+                            "value (prices are skewed: a few players cost far more):")
+                st.latex(rf"\ln(\text{{price}}) = c + \sum_{{t=1}}^{{{valuation['trees']}}} "
+                         rf"{valuation['learning_rate']:g}\cdot\text{{tree}}_t(x)")
+                st.latex(r"\text{price} = e^{\ln(\text{price})}")
+                st.markdown(
+                    f"- **x**: {', '.join(c for c in valuation['features'] if not c.startswith('Position_'))}, "
+                    "and the player's position.\n"
+                    f"- **tree_t**: {valuation['trees']} small trees of {valuation['leaves']} leaves, each fitted to "
+                    "what the trees before it got wrong; **c** is the average log price.\n"
+                    f"- **Out-of-fold**: {chosen} was priced by a model trained on the *other* four-fifths of the "
+                    "league, never on their own price.\n"
+                    f"- **Accuracy**: cross-validated R² {valuation['r2']:.2f} (0 = no better than the average "
+                    f"price), typical error €{valuation['mae_m']:.0f}m. Off-ball work explains little of a price, "
+                    "which is mostly finishing, passing and position: the gap to market value is the scouting "
+                    "signal, not a precise valuation.")
+
         st.subheader("Most similar players")
         st.caption(f"Nearest {row['broad_position'].lower()}s on the four standardised pillars, "
                    "with their price: a like-for-like shortlist.")
@@ -998,7 +1031,8 @@ if page == "Value Finder":
             f"Cross-validated R² **{valuation['r2']:.2f}** (log value; 0 = no better than the average), "
             f"typical error **€{valuation['mae_m']:.0f}m**. Off-ball work explains little of a price, "
             "which is driven mostly by finishing, passing, speed and position: the gap between "
-            "price and contribution is the scouting signal, not a precise valuation.")
+            "price and contribution is the scouting signal, not a precise valuation. The Player Profile "
+            "breaks any player's price down step by step, with the formula.")
 
         if predicted:
             finds = pool.assign(gap=pool["Predicted_Value"] / pool["market_value_m"])

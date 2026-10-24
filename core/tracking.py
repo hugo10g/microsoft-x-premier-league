@@ -172,9 +172,12 @@ def possession_by_frame(events: pd.DataFrame, frames: np.ndarray) -> np.ndarray:
     """(T,) team in possession at each frame; None before the first event and while the ball is out.
 
     Possession belongs to whoever made the most recent on-ball event, until the ball
-    goes out of play.
+    goes out of play or into the net.
     """
-    relevant = events[events["Type"].isin(POSSESSION_EVENTS | DEAD_BALL_EVENTS)]
+    goals = events[(events["Type"] == "SHOT") & events["Subtype"].astype(str).str.contains("GOAL")]
+    in_net = goals.assign(Type="BALL OUT").assign(**{"Start Frame": goals["End Frame"]})
+    relevant = pd.concat([events, in_net])
+    relevant = relevant[relevant["Type"].isin(POSSESSION_EVENTS | DEAD_BALL_EVENTS)]
     relevant = relevant.sort_values("Start Frame", kind="stable")
     owner = np.where(relevant["Type"].isin(DEAD_BALL_EVENTS), None, relevant["Team"]).astype(object)
     latest = np.searchsorted(relevant["Start Frame"].to_numpy(), frames, side="right") - 1

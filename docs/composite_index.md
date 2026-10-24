@@ -75,18 +75,18 @@ To weight every metric equally instead, set each category's weight to its number
 
 | Score | Tracks |
 |---|---|
-| Index | 0.57 with the mean of work rate, pressing and awareness |
-| Movement | 0.75 with work rate |
-| Scanning | 0.86 with awareness |
-| Defence | 0.67 with pressing |
-| Spacing | none (|ρ| ≤ 0.27 with every trait) |
-| Creation | weak (|ρ| ≤ 0.38 with every trait) |
+| Index | 0.54 with the mean of work rate, pressing and awareness |
+| Movement | 0.67 with work rate |
+| Scanning | 0.88 with awareness |
+| Defence | 0.64 with pressing |
+| Spacing | none (|ρ| ≤ 0.25 with every trait) |
+| Creation | weak (|ρ| ≤ 0.43 with every trait) |
 
 ## Limitations and flags
 
 - **Multicollinearity.**
-  - `lane_cut_p90` and `pressure_intensity` have ρ = 0.82, and `pressure_intensity` and `press_wins_p90` 0.80, so pressing volume dominates Defence. Lowering those weights in the config is a reasonable fix.
-  - Press-and-win enters Defence as pressures won per 90 (`press_wins_p90`), not the win *rate* (`press_win_pct`). The rate has no link to the hidden pressing trait here (ρ −0.06; the count 0.48): in the simulator whether a press ends in a turnover depends on the carrier and the passing lane, not the presser. With the rate in Defence, Defence tracked pressing at 0.55 and the index 0.54; with pressures won per 90, 0.67 and 0.57. The count overlaps pressure intensity (ρ 0.80), so pressing volume now carries three of Defence's four metrics. The rate is still shown in the leaderboards.
+  - `pressure_intensity` and `press_wins_p90` have ρ = 0.75, and lane cuts overlap both (0.73, 0.72), so pressing volume dominates Defence. Lowering those weights in the config is a reasonable fix.
+  - Press-and-win enters Defence as pressures won per 90 (`press_wins_p90`), not the win *rate* (`press_win_pct`). The rate has no link to the hidden pressing trait here (ρ −0.41; the count 0.45): in the simulator whether a press ends in a turnover depends on the carrier and the passing lane, not the presser. With the rate in Defence, Defence tracked pressing at 0.31 and the index 0.52; with pressures won per 90, 0.64 and 0.54. The count overlaps pressure intensity (ρ 0.74), so pressing volume now carries three of Defence's four metrics. The rate is still shown in the leaderboards.
   - The script prints every pair of scores with |ρ| > 0.7.
 - **Sample size.**
   - There are only 6 matches, and each player has at most about 280 minutes.

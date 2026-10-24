@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 
-from core.ml_model import FEATURES, ROLES, cluster_player_roles, present_features, role_names, train_valuation_model
+from core.ml_model import (FEATURES, ROLES, cluster_player_roles, design_matrix, present_features, price_steps,
+                           role_names, train_valuation_model)
 
 
 def league(n=60, seed=0):
@@ -95,3 +96,13 @@ def test_blank_scan_rate_is_ignored():
     assert out["Cluster_Role"].nunique() == 4 and "Scanner" not in set(out["Cluster_Role"])
     _, priced = train_valuation_model(df)
     assert "Scanning rate (scans/s before receiving)" not in priced.attrs["valuation"]["features"]
+
+
+def test_price_steps_start_from_a_typical_player_and_end_at_the_out_of_fold_price():
+    _, out = train_valuation_model(league())
+    valuation, X = out.attrs["valuation"], design_matrix(out)
+    for row in (0, 7, 31):
+        steps = price_steps(valuation["fold_models"][out["Price_Fold"].iloc[row]], X, row)
+        assert steps[0][0] == f"Typical {out['broad_position'].iloc[row]}"
+        assert [label for label, _ in steps[1:]] == [c for c in X.columns if not c.startswith("Position_")]
+        assert abs(steps[-1][1] - out["Predicted_Value"].iloc[row]) < 0.06      # the price shown (rounded)

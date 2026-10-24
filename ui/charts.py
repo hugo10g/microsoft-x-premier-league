@@ -763,3 +763,22 @@ def impact_weights(weights: pd.DataFrame, labels: dict[str, str]) -> go.Figure:
     fig.update_xaxes(title="Shot difference per standard deviation of team work (0 = no detectable effect)",
                      rangemode="tozero")
     return style(fig, title, height=320)
+
+
+def price_waterfall(steps: list[tuple[str, float]], title: str = "How the ML price is built") -> go.Figure:
+    """Waterfall of core.ml_model.price_steps: a typical price, each feature's change, the price."""
+    if len(steps) < 2:
+        return empty_figure(title)
+    labels = [wrap(steps[0][0], 12)] + [wrap(label, 12) for label, _ in steps[1:]] + ["ML price"]
+    changes = [steps[0][1]] + [b - a for (_, a), (_, b) in zip(steps, steps[1:])] + [steps[-1][1]]
+    fig = go.Figure(go.Waterfall(
+        x=labels, y=changes, measure=["absolute"] + ["relative"] * (len(steps) - 1) + ["total"],
+        text=[f"€{v:.1f}m" if m != "relative" else f"{v:+.1f}m"
+              for v, m in zip(changes, ["absolute"] + ["relative"] * (len(steps) - 1) + ["total"])],
+        textposition="outside", cliponaxis=False,
+        increasing=dict(marker=dict(color=PALETTE[2])), decreasing=dict(marker=dict(color=PALETTE[1])),
+        totals=dict(marker=dict(color=PALETTE[0])), connector=dict(line=dict(color=GUIDE, width=1, dash="dot")),
+        hovertemplate="<b>%{x}</b><br>%{text}<extra></extra>"))
+    fig.update_yaxes(title="€ millions (synthetic)", rangemode="tozero")
+    fig.update_layout(showlegend=False)
+    return style(fig, title, height=380)

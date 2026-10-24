@@ -56,7 +56,7 @@
 </div>
 <script>
 const D = __DATA__;
-const L = D.pitch.length, W = D.pitch.width, MARGIN = 3, R = 1.25;   // metres
+const L = D.pitch.length, W = D.pitch.width, MARGIN = 3, R = 1.0;    // metres: a player is drawn 2 m across
 const P = D.players.length, F = D.frames;
 const HAS_HEAD = Array.isArray(D.head) && D.head.some(v => v !== null);
 const CONE_HALF = 25 * Math.PI / 180, CONE_LEN = 5;                  // vision cone: half-angle, metres

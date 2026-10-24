@@ -40,25 +40,25 @@ The five tactical metrics, combined into one 0–100 score per player. Each metr
 
 | Metric | Weight (shots per SD) | 95% interval | Above 0 in |
 |---|---|---|---|
-| OBSO | 0.67 | 0.37–0.98 | 100% |
-| Defensive cover | 0.45 | 0.15–0.65 | over 99% |
-| Pulling wide (run type) | 0.18 | 0.01–0.37 | 98% |
-| Receipts in space | 0.10 | 0.03–0.23 | 99% |
-| Pressure intensity | 0.02 | 0–0.20 | 68% |
-| Runs in behind, dropping deep | 0 | 0–0.09 | 3–39% |
+| OBSO | 0.90 | 0.60–1.18 | 100% |
+| Defensive cover | 0.33 | 0.19–0.42 | 100% |
+| Runs in behind (run type) | 0.17 | 0.05–0.24 | 99% |
+| Pulling wide (run type) | 0.06 | 0–0.15 | 90% |
+| Receipts in space, dropping deep | 0.01 | 0–0.16 | 52–56% |
+| Pressure intensity | 0 | 0–0.03 | 12% |
 
-That makes the pillar weights about **47% OBSO, 32% Defensive cover, 13% Run types, 7% Receipts in space and 2% Pressure**.
+That makes the pillar weights about **61% OBSO, 22% Defensive cover, 16% Run types, 1% Receipts in space and 0 for Pressure**.
 
 Checked against the hidden traits (Spearman, within position, n = 40):
 
 | Score | Correlation |
 |---|---|
-| Impact index vs the Off-Ball Index | 0.72 |
-| Impact index vs the mean of work rate, pressing and awareness | 0.16 |
-| Pressure pillar vs pressing | 0.71 |
-| Run types pillar vs work rate | 0.43 |
-| OBSO pillar | weak (|ρ| ≤ 0.38 with every trait) |
-| Defensive cover pillar | none (|ρ| ≤ 0.12) |
+| Impact index vs the Off-Ball Index | 0.67 |
+| Impact index vs the mean of work rate, pressing and awareness | 0.14 |
+| Pressure pillar vs pressing | 0.72 |
+| Run types pillar vs work rate | 0.39 |
+| OBSO pillar | weak (|ρ| ≤ 0.43 with every trait) |
+| Defensive cover pillar | none (|ρ| ≤ 0.16) |
 
 The impact index keeps the original five tactical metrics. Press-and-win (`press_wins_p90`) feeds the Off-Ball Index's Defence category instead; as a team-window feature it would largely re-count the regains that start the attacks being measured.
 

@@ -131,3 +131,71 @@ def test_offside_is_beyond_the_second_last_defender_and_the_ball_and_corners_go_
     match.corner(0, frame=10, near=np.array([105.0, 5.0]))
     assert match.restart["kind"] == "CORNER KICK"
     np.testing.assert_allclose(match.restart["spot"], [104.7, 0.3])
+
+
+def test_a_defender_in_the_shooting_lane_blocks_and_one_off_it_never_does():
+    match = kicked_off_match()
+    away = np.flatnonzero(match.active & (match.team == 1) & ~match.keeper)
+    match.pos[away] = [20.0, 5.0]                                     # everyone far away...
+    here, line = np.array([80.0, 34.0]), np.array([25.0, 0.0])        # ...a shot straight at goal
+    assert all(match.blocker(here, line) is None for _ in range(50))
+    match.pos[away[0]] = [86.0, 34.0]                                 # one defender right in the lane
+    blocks = [match.blocker(here, line) for _ in range(50)]
+    assert sum(b is not None for b in blocks) > 30 and {b[0] for b in blocks if b} == {int(away[0])}
+    match.pos[away[0]] = [86.0, 39.0]                                 # 5 m off the line: no block
+    assert all(match.blocker(here, line) is None for _ in range(50))
+
+
+def test_a_decoy_runs_space_is_taken_by_the_teammate_nearest_it():
+    match = kicked_off_match()
+    home = np.flatnonzero(match.active & (match.team == 0) & ~match.keeper)
+    away = np.flatnonzero(match.active & (match.team == 1) & ~match.keeper)
+    match.pos[home] = [10.0, 5.0]
+    match.pos[away] = [30.0, 60.0]
+    runner, near = home[0], home[1]
+    match.pos[runner], match.pos[away[0]], match.pos[near] = [70.0, 34.0], [72.0, 36.0], [62.0, 38.0]
+    space, taker = match.space_taker(int(runner), 0)
+    np.testing.assert_allclose(space, [72.0, 36.0])
+    assert taker == near                                              # the marker's spot goes to the nearest mate
+
+
+def test_the_bench_goalkeeper_never_comes_on_so_each_side_has_one_keeper():
+    for seed in range(20):
+        rng = np.random.default_rng(seed)
+        used: set = set()
+        home, away = make_squad("Test A", "4-3-3", rng, used), make_squad("Test B", "4-4-2", rng, used)
+        match = Match(home, away, seed=seed)
+        for side in (0, 1):
+            squad = match.team == side
+            assert (squad & match.keeper).sum() == 1                    # only the starting keeper is in the 14
+
+
+def test_at_a_penalty_everyone_but_the_taker_and_keeper_is_outside_the_box_and_the_d():
+    from core.synthetic import BOX_DEPTH, FPS, WALL_DISTANCE
+    match = kicked_off_match()
+    match.last_turnover = -10_000
+    match.ball = np.array([97.0, 34.0])
+    match.foul(fouler=20, frame=10)
+    spot, taker = match.restart["spot"], match.restart["taker"]
+    for frame in range(11, 11 + 60 * FPS):                             # the minute it takes to set up
+        if frame >= match.restart["moves"]:
+            match.ball = match.toward(match.ball, spot, 10.0)
+        match.steer(frame, *match.frame_targets(frame))
+    others = match.active & ~match.keeper
+    others[taker] = False
+    assert (np.linalg.norm(match.pos[others] - spot, axis=1) > WALL_DISTANCE).all()
+    assert (match.pos[others, 0] < 105.0 - BOX_DEPTH).all()
+
+
+def test_two_players_sent_to_the_same_spot_stand_apart_instead_of_on_top_of_each_other():
+    from core.synthetic import FPS, MATE_GAP
+    match = kicked_off_match()
+    match.last_turnover = -10_000
+    home = np.flatnonzero(match.active & (match.team == 0) & ~match.keeper)
+    a, b = home[0], home[1]
+    match.pos[a], match.pos[b] = [60.0, 30.0], [60.0, 30.0]           # exactly on top of each other
+    for frame in range(3 * FPS):
+        targets = match.pos.copy()
+        targets[[a, b]] = [60.0, 30.0]                                  # and both told to stay there
+        match.steer(frame, targets, np.full(len(match.pos), 0.5))
+    assert np.linalg.norm(match.pos[a] - match.pos[b]) > 0.8 * MATE_GAP

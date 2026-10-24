@@ -18,8 +18,10 @@ The match engine, frame by frame:
                 behind, and opponents 9.15 m from a free kick or corner
     shape       each team holds its formation slots, a block that slides with the
                 ball: higher and wider in possession, deeper and narrower without it
-    roles       the nearest defenders press the ball, attackers make forward runs
-                and markers follow them, the pass receiver attacks the landing spot
+    roles       the nearest defenders press the ball (and close the shooting lane near
+                goal), attackers make forward runs and markers follow them, a teammate
+                moves into the space a dragged marker leaves, the pass receiver attacks
+                the landing spot
     movement    every player steers towards their target under a top speed and an
                 acceleration limit; after a turnover, low-work-rate players react late
     heads       every player's head follows the ball under a turn-rate limit; off the
@@ -134,12 +136,12 @@ PRESS_DRIVE = {"Defensive Midfield": 1.8, "Central Midfield": 1.2, "Centre-Forwa
 # Shooting, tuned so a match averages about 25 shots, a third on target, and
 # 2.8 goals (a Premier League season's rates): how readily a player shoots from a
 # given distance, and how often an on-target shot beats the keeper.
-SHOT_TENDENCY = 1.0
-FINISH_FACTOR = 1.9
+SHOT_TENDENCY = 1.5
+FINISH_FACTOR = 5.0
 # After a turnover, players near the ball react after REACTION_BASE + REACTION_SLOW *
 # (1 - work rate) seconds, plus a random REACTION_JITTER (mean, s) per turnover, then sprint
 # for TRANSITION_BURST s: attackers forward into space, defenders back goal-side of the ball.
-REACTION_BASE, REACTION_SLOW, REACTION_JITTER = 0.15, 1.5, 1.0
+REACTION_BASE, REACTION_SLOW, REACTION_JITTER = 0.15, 0.9, 0.4
 TRANSITION_BURST, TRANSITION_RADIUS = 2.5, 30.0
 SCAN_MEMORY = 5.0                 # seconds of checks a receiver benefits from
 # Checks in that memory (0, 1, 2, 3+) -> (dispossession multiplier, pass-success logit shift).
@@ -156,19 +158,36 @@ RESTART_PAUSE, RETURN_SPEED = 1.5, 10.0    # s a dead ball rests, then m/s back 
 # early, free ones carry) and shrinks for better passers. ONE_TOUCH of pressed receptions
 # are first-time passes, and a holder closed down to PRESSURE_RELEASE m plays within a
 # reaction time.
-ONE_TOUCH, PRESSURE_RELEASE = 0.15, 2.0
+ONE_TOUCH, PRESSURE_RELEASE = 0.25, 2.0
 # Rules. A challenge at tackling distance is a foul FOUL_CHANCE x (0.6 + 0.8 pressing) of the
 # time (x BOX_CARE inside the defender's own box, where it is a penalty); YELLOW_SHARE of fouls
 # are booked, once per player (no second yellows or reds: it stays 11 v 11). A receiver beyond
 # the second-last opponent, the ball and halfway when the pass is played is offside; passers
 # mostly see it (OFFSIDE_AVOID off the option's score). Some saves are parried and some wide
 # shots deflected behind for a corner.
-FOUL_CHANCE, BOX_CARE, YELLOW_SHARE = 0.1, 0.6, 0.17
+FOUL_CHANCE, BOX_CARE, YELLOW_SHARE = 0.11, 1.0, 0.17
 WALL_DISTANCE = 9.15                         # m opponents keep from a free kick or corner
+SET_MARGIN = 3.0                             # m beyond a line players aim for (they stop short and drift)
 PENALTY_SPOT, BOX_DEPTH, BOX_HALF_WIDTH = 11.0, 16.5, 20.16
-PENALTY_ON_TARGET, PENALTY_SCORES = 0.85, 0.9   # on target; scored when on target
-SAVE_TO_CORNER, MISS_TO_CORNER = 0.4, 0.5
-OFFSIDE_AVOID = 4.0
+PENALTY_ON_TARGET = 0.9
+PENALTY_SCORES = (0.97, 0.7)    # scored when on target: keeper dived the wrong way, the right way
+# A keeper facing a shot dives: a burst at DIVE_ACCEL m/s² up to DIVE_SPEED m/s, with no
+# slowing into the spot (a dive, not a jog). At a penalty they guess a side and dive at the kick.
+DIVE_ACCEL, DIVE_SPEED = 20.0, 6.5
+# Bodies take up space: players closer than MATE_GAP (teammates) or RIVAL_GAP (opponents, who
+# can be in contact in a duel) are pushed apart at SEPARATION_PUSH m/s per metre of overlap.
+MATE_GAP, RIVAL_GAP, SEPARATION_PUSH = 2.0, 0.8, 8.0
+SAVE_TO_CORNER, MISS_TO_CORNER = 0.4, 0.4
+# Blocking: an outfield defender within BLOCK_REACH m of a shot's path, in the first 90% of
+# it, blocks it BLOCK_CHANCE x (1 - distance / reach) of the time (nearest the shooter first).
+# A block goes behind for a corner MISS_TO_CORNER of the time, else the blocker has it. Within
+# SHOOTING_RANGE of goal, pressing defenders close the shooting lane instead of the pass forward.
+BLOCK_REACH, BLOCK_CHANCE, SHOOTING_RANGE = 2.2, 0.85, 30.0
+OVERHIT = 0.12                               # share of failed passes that run out of play
+# Seconds the ball is dead before each restart can be taken (a match has ~55-60 min in play).
+RESTART_WAIT = {"THROW IN": 16.0, "GOAL KICK": 24.0, "FREE KICK": 28.0, "CORNER KICK": 32.0,
+                "PENALTY": 60.0, "KICK OFF": 55.0}
+OFFSIDE_AVOID = 4.4
 
 
 def wrap_degrees(angle):
@@ -257,7 +276,10 @@ class Match:
         self.half_minutes = half_minutes
         # 11 starters + 3 substitutes per side appear in the tracking.
         self.home, self.away = home, away
-        subs = lambda squad: [squad[11 + k] for k in self.rng.choice(5, 3, replace=False)]
+        # Three outfield substitutes per side: the bench keeper never comes on (only a keeper
+        # can replace a keeper, and keepers aren't substituted here).
+        subs = lambda squad: [squad[k] for k in self.rng.choice(
+            [k for k in range(11, len(squad)) if squad[k].detailed != "Goalkeeper"], 3, replace=False)]
         self.players = home[:11] + subs(home) + away[:11] + subs(away)
         n = len(self.players)
         self.team = np.array([0] * 14 + [1] * 14)
@@ -283,8 +305,9 @@ class Match:
         self.holder_checks: int | None = None         # the holder's checks before receiving
         self.next_decision, self.rushed = 0, False    # when the holder acts; already closed down?
         self.booked: set[int] = set()                 # players with a yellow card
-        self.runs: dict = {}                          # player -> (aim, until frame)
+        self.runs: dict = {}                          # runner -> (aim, until, space they open, who takes it)
         self.flight = self.holder = self.receiver = self.restart = None
+        self.diving: int | None = None               # the keeper diving at a shot in flight
         self.events: list[dict] = []
         self.schedule_substitutions()
 
@@ -380,24 +403,46 @@ class Match:
         side = int(self.team[k])
         return bool(self.pos[k, 0] * self.side_sign(side) > self.offside_line(side) + 0.3)
 
-    def shoot(self, frame: int, aim: np.ndarray, on_target: bool, scores: bool) -> None:
-        """The holder strikes at `aim` on the goal line: into the net, to the keeper, or wide."""
+    def blocker(self, here: np.ndarray, line: np.ndarray) -> tuple[int, float] | None:
+        """(defender, fraction of the way) of whoever blocks a shot along `line`, if anyone."""
+        defenders = np.flatnonzero(self.active & (self.team != self.possession) & ~self.keeper)
+        along = ((self.pos[defenders] - here) @ line) / max(line @ line, 1e-6)
+        gap = np.linalg.norm(self.pos[defenders] - (here + along[:, None] * line), axis=1)
+        near = np.flatnonzero((along > 0.02) & (along < 0.9) & (gap < BLOCK_REACH))
+        for k in near[np.argsort(along[near])]:                 # nearest the shooter first
+            if self.rng.random() < BLOCK_CHANCE * (1 - gap[k] / BLOCK_REACH):
+                return int(defenders[k]), float(along[k])
+        return None
+
+    def shoot(self, frame: int, aim: np.ndarray, on_target: bool, scores: bool, blockable: bool = True,
+              dive: np.ndarray | None = None) -> None:
+        """The holder strikes at `aim` on the goal line: blocked, into the net, to the keeper, or wide.
+
+        The keeper dives at `dive` (a penalty's guess) or, by default, where the ball is going.
+        """
         holder, side, here = self.holder, self.possession, self.ball.copy()
         keepers = np.flatnonzero(self.keeper & self.active & (self.team == 1 - side))
         keeper = int(keepers[0]) if len(keepers) else self.nearest(1 - side, aim)
         line = aim - here
         heading = line / max(np.linalg.norm(line), 1e-6)
-        if scores:                                     # on into the net
+        block = self.blocker(here, line) if blockable else None
+        if block is not None:                          # into a defender
+            to, on_target, scores = here + block[1] * line, False, False
+        elif scores:                                   # on into the net
             to = aim + heading * NET_DEPTH / max(abs(heading[0]), 0.2)
         elif on_target:                                # where the keeper meets it
-            reach = np.clip(((self.pos[keeper] - here) @ line) / max(line @ line, 1e-6), 0.7, 1.0)
+            catch = self.pos[keeper] if dive is None else dive
+            reach = np.clip(((catch - here) @ line) / max(line @ line, 1e-6), 0.7, 1.0)
             to = here + reach * line
         else:                                          # wide, on past the line
             to = aim + heading * MISS_RUN_ON / max(abs(heading[0]), 0.2)
         to[1] = np.clip(to[1], -2.0, W + 2.0)
         power = 22 + 8 * self.players[holder].finishing + self.rng.normal(0, 2)
+        dive = np.clip(to if dive is None else dive, [0.5, 0.5], [L - 0.5, W - 0.5])
         self.flight = self.strike("shot", here, to, power, SHOT_DECEL, frame, on_target=on_target,
-                                  goal=scores, shooter=holder, keeper=keeper)
+                                  goal=scores, shooter=holder, keeper=keeper, dive=dive,
+                                  blocker=block[0] if block is not None else None)
+        self.diving = keeper if block is None else None
         self.holder = None
 
     def foul(self, fouler: int, frame: int) -> None:
@@ -411,21 +456,25 @@ class Match:
             mates = np.flatnonzero(self.active & (self.team == side) & ~self.keeper)
             taker = int(mates[np.argmax([self.players[k].finishing for k in mates])])
             penalty = self.goal_of(side) - np.array([self.side_sign(side) * PENALTY_SPOT, 0])
-            self.dead_ball(side, penalty, frame, "PENALTY", 6.0, taker=taker)
+            self.dead_ball(side, penalty, frame, "PENALTY", taker=taker)
         else:
-            self.dead_ball(side, np.clip(spot, [1.0, 1.0], [L - 1.0, W - 1.0]), frame, "FREE KICK", 4.0)
+            self.dead_ball(side, np.clip(spot, [1.0, 1.0], [L - 1.0, W - 1.0]), frame, "FREE KICK")
 
     def take_penalty(self, frame: int) -> None:
+        """The taker picks a side, the keeper guesses one and dives at the kick."""
+        goal, s = self.goal_of(self.possession), self.side_sign(self.possession)
+        side, guess = self.rng.choice([-1.0, 1.0], 2)
         on_target = self.rng.random() < PENALTY_ON_TARGET
-        corner = self.rng.choice([-1.0, 1.0]) * (self.rng.uniform(0.8, 3.3) if on_target else self.rng.uniform(3.9, 5.5))
-        self.shoot(frame, self.goal_of(self.possession) + np.array([0, corner]), on_target,
-                   on_target and self.rng.random() < PENALTY_SCORES)
+        corner = side * (self.rng.uniform(0.8, 3.3) if on_target else self.rng.uniform(3.9, 5.5))
+        scores = on_target and self.rng.random() < PENALTY_SCORES[int(guess == side)]
+        self.shoot(frame, goal + np.array([0, corner]), on_target, scores, blockable=False,
+                   dive=goal + np.array([-s * 0.6, guess * 2.8]))
 
     def corner(self, side: int, frame: int, near: np.ndarray) -> None:
         """A corner to `side` at the flag nearest `near`."""
         goal = self.goal_of(side)
         flag = np.array([np.clip(goal[0], 0.3, L - 0.3), 0.3 if near[1] < W / 2 else W - 0.3])
-        self.dead_ball(side, flag, frame, "CORNER KICK", 7.0)
+        self.dead_ball(side, flag, frame, "CORNER KICK")
 
     def hold_frames(self, k: int) -> int:
         """Frames player k keeps a ball they've just won or received (see ONE_TOUCH)."""
@@ -434,7 +483,7 @@ class Match:
         if room < 6 and self.rng.random() < ONE_TOUCH:
             seconds = self.rng.uniform(0.2, 0.45)
         else:
-            mean = (0.8 + 0.25 * min(room, 12)) * (1.3 - 0.6 * self.players[k].passing)
+            mean = (0.55 + 0.15 * min(room, 12)) * (1.3 - 0.6 * self.players[k].passing)
             seconds = self.rng.gamma(2.0, mean / 2)
         return int(seconds * FPS)
 
@@ -503,7 +552,7 @@ class Match:
         if self.offside(receiver):                         # flagged when the receiver plays it
             flight.update(kind="offside", offside_at=self.pos[receiver].copy())
         elif self.rng.random() > success:
-            if self.rng.random() < 0.3:                            # overhit: out of play
+            if self.rng.random() < OVERHIT:                        # out of play
                 out = here + seg * 1.6
                 out[1] = np.clip(out[1], -1.5, W + 1.5)
                 if 0 < out[1] < W:
@@ -555,7 +604,7 @@ class Match:
 
     def land_ball(self, frame: int) -> None:
         f, side = self.flight, self.possession
-        self.flight = None
+        self.flight, self.diving = None, None
         if f["kind"] == "pass":
             self.log(side, "PASS", "", f["start"], frame, f["passer"], f["receiver"], f["from"], f["to"])
             self.holder = f["receiver"]
@@ -564,7 +613,7 @@ class Match:
         elif f["kind"] == "offside":
             self.log(side, "PASS", "", f["start"], frame, f["passer"], None, f["from"], f["to"])
             self.log(side, "OFFSIDE", "", frame, frame, f["receiver"], None, f["offside_at"], f["offside_at"])
-            self.dead_ball(1 - side, np.clip(f["offside_at"], [1.0, 1.0], [L - 1.0, W - 1.0]), frame, "FREE KICK", 4.0)
+            self.dead_ball(1 - side, np.clip(f["offside_at"], [1.0, 1.0], [L - 1.0, W - 1.0]), frame, "FREE KICK")
         elif f["kind"] == "intercepted":
             self.log(side, "BALL LOST", "INTERCEPTION", f["start"], frame, f["passer"], None, f["from"], f["to"])
             self.log(1 - side, "RECOVERY", "INTERCEPTION", frame, frame, f["interceptor"], None, f["to"], f["to"])
@@ -573,15 +622,23 @@ class Match:
             self.log(side, "PASS", "", f["start"], frame, f["passer"], None, f["from"], f["to"])
             self.log(side, "BALL OUT", "", frame, frame, f["passer"], None, f["to"], f["to"])
             spot = np.array([np.clip(f["to"][0], 1, L - 1), np.clip(f["to"][1], 0, W)])
-            self.dead_ball(1 - side, spot, frame, "THROW IN", 3.0)
+            self.dead_ball(1 - side, spot, frame, "THROW IN")
         else:                                                      # shot
-            subtype = "ON TARGET-GOAL" if f["goal"] else "ON TARGET-SAVED" if f["on_target"] else "OFF TARGET-OUT"
+            blocker = f["blocker"]
+            subtype = "BLOCKED" if blocker is not None else "ON TARGET-GOAL" if f["goal"] \
+                else "ON TARGET-SAVED" if f["on_target"] else "OFF TARGET-OUT"
             self.log(side, "SHOT", subtype, f["start"], frame, f["shooter"], None, f["from"], f["to"])
             keeper = f["keeper"]
-            if f["goal"]:
+            if blocker is not None and self.rng.random() < MISS_TO_CORNER:   # deflected behind
+                self.log(1 - side, "BALL OUT", "", frame, frame, blocker, None, f["to"], f["to"])
+                self.corner(side, frame, f["to"])
+            elif blocker is not None:
+                self.log(1 - side, "RECOVERY", "BLOCK", frame, frame, blocker, None, f["to"], f["to"])
+                self.turnover(blocker, frame)
+            elif f["goal"]:
                 self.score[side] += 1
                 self.possession = 1 - side
-                self.dead_ball(1 - side, np.array([L / 2, W / 2]), frame, "KICK OFF", 8.0, kickoff=True)
+                self.dead_ball(1 - side, np.array([L / 2, W / 2]), frame, "KICK OFF", kickoff=True)
             elif f["on_target"] and self.rng.random() < SAVE_TO_CORNER:     # parried behind
                 self.log(1 - side, "BALL OUT", "", frame, frame, keeper, None, f["to"], f["to"])
                 self.corner(side, frame, f["to"])
@@ -595,7 +652,7 @@ class Match:
             else:
                 self.log(side, "BALL OUT", "", frame, frame, f["shooter"], None, f["to"], f["to"])
                 spot = np.array([5.5 if f["to"][0] < L / 2 else L - 5.5, W / 2])
-                self.dead_ball(1 - side, spot, frame, "GOAL KICK", 5.0, taker=keeper)
+                self.dead_ball(1 - side, spot, frame, "GOAL KICK", taker=keeper)
 
     def turnover(self, new_holder: int, frame: int) -> None:
         self.possession = int(self.team[new_holder])
@@ -606,8 +663,9 @@ class Match:
         self.runs.clear()
         self.next_decision, self.rushed = frame + int(0.2 * FPS) + self.hold_frames(new_holder), False
 
-    def dead_ball(self, side: int, spot: np.ndarray, frame: int, kind: str, wait: float,
+    def dead_ball(self, side: int, spot: np.ndarray, frame: int, kind: str, wait: float | None = None,
                   kickoff: bool = False, taker: int | None = None) -> None:
+        wait = RESTART_WAIT[kind] if wait is None else wait
         self.possession = side
         self.holder, self.flight = None, None             # the ball stays where it went dead for now
         self.restart = {"side": side, "spot": spot, "kind": kind, "ready": frame + int(wait * FPS),
@@ -617,6 +675,21 @@ class Match:
         self.runs.clear()
 
     # ── Movement ─────────────────────────────────────────────────────────────
+    def separation(self) -> np.ndarray:
+        """(P, 2) m/s pushing apart players standing closer than MATE_GAP / RIVAL_GAP."""
+        on = np.flatnonzero(self.active)
+        gap = self.pos[on][:, None] - self.pos[on][None]                 # from each other player to me
+        distance = np.linalg.norm(gap, axis=-1)
+        np.fill_diagonal(distance, np.inf)
+        need = np.where(self.team[on][:, None] == self.team[on][None], MATE_GAP, RIVAL_GAP)
+        overlap = np.clip(need - distance, 0, None)
+        # Two players on exactly the same spot step apart sideways, by index, rather than not at all.
+        apart = np.where(distance[..., None] > 1e-6, gap / np.maximum(distance, 1e-6)[..., None],
+                         np.stack([np.sign(on[:, None] - on[None]), np.zeros((len(on), len(on)))], axis=-1))
+        push = np.zeros_like(self.pos)
+        push[on] = (apart * overlap[..., None]).sum(axis=1) * SEPARATION_PUSH
+        return push
+
     def steer(self, frame: int, targets: np.ndarray, urgency: np.ndarray) -> None:
         since = (frame - self.last_turnover) * DT
         slow = since < REACTION_BASE + REACTION_SLOW * (1 - self.work) + self.reaction_jitter   # late to react
@@ -625,9 +698,15 @@ class Match:
         distance = np.linalg.norm(offset, axis=1, keepdims=True)
         speed = np.minimum(self.top_speed[:, None] * urgency[:, None], 0.7 * np.maximum(distance - 1.5, 0))
         desired = np.divide(offset, distance, out=np.zeros_like(offset), where=distance > 1e-6) * speed
+        desired += self.separation()
+        limit = np.full((len(self.pos), 1), 5.0)
+        if self.diving is not None:                    # a dive: full speed into the spot
+            k = self.diving
+            desired[k] = offset[k] / max(float(distance[k, 0]), 1e-6) * min(DIVE_SPEED, distance[k, 0] / DT)
+            limit[k] = DIVE_ACCEL
         accel = (desired - self.vel) / 0.45
         norm = np.linalg.norm(accel, axis=1, keepdims=True)
-        accel = np.where(norm > 5.0, accel / np.maximum(norm, 1e-9) * 5.0, accel)
+        accel = np.where(norm > limit, accel / np.maximum(norm, 1e-9) * limit, accel)
         self.vel += accel * DT + self.rng.normal(0, 0.05, self.vel.shape)
         self.pos += self.vel * DT
 
@@ -656,9 +735,8 @@ class Match:
             targets[self.holder], urgency[self.holder] = self.ball, 0.9      # meet the ball
         if self.flight and self.flight.get("receiver") is not None and self.flight["kind"] in ("pass", "offside"):
             targets[self.flight["receiver"]], urgency[self.flight["receiver"]] = self.flight["to"], 0.9
-        if self.flight and self.flight["kind"] == "shot":                    # the keeper goes for it
-            targets[self.flight["keeper"]] = np.clip(self.flight["to"], [0.5, 0.5], [L - 0.5, W - 0.5])
-            urgency[self.flight["keeper"]] = 1.0
+        if self.flight and self.flight["kind"] == "shot" and self.flight["blocker"] is None:   # the keeper dives
+            targets[self.flight["keeper"]], urgency[self.flight["keeper"]] = self.flight["dive"], 1.0
 
         # Off-ball runs by role, and the markers who follow them.
         attackers = np.flatnonzero(self.active & (self.team == side) & ~self.keeper)
@@ -669,8 +747,8 @@ class Match:
             if self.rng.random() < DT * 0.045 * style[0] * (0.15 + 1.7 * self.work[k]):
                 kind = RUN_KINDS[int(self.rng.choice(3, p=style[1]))]
                 length = 1.5 + 2.5 * self.work[k] + self.rng.uniform(0, 1)      # hard workers run longer
-                self.runs[k] = (self.run_aim(k, kind, side), frame + int(length * FPS))
-        for k, (aim, until) in list(self.runs.items()):
+                self.runs[k] = (self.run_aim(k, kind, side), frame + int(length * FPS)) + self.space_taker(k, side)
+        for k, (aim, until, space, taker) in list(self.runs.items()):
             if frame > until or k == self.holder:
                 del self.runs[k]
                 continue
@@ -680,6 +758,9 @@ class Match:
                 goal_side = self.pos[k] - np.array([s * 1.5, 0])
                 targets[marker] = 0.75 * goal_side + 0.25 * targets[marker]
                 urgency[marker] = 0.6 + 0.35 * self.work[marker]
+                if taker is not None and taker != self.holder and taker not in self.runs:   # into the space left
+                    targets[taker] = [min(space[0] * s, line) * s, space[1]]
+                    urgency[taker] = 0.3 + 0.25 * self.awareness[taker]       # a drift into it, not a sprint
 
         # Transition burst: players near the ball sprint once they've reacted (see steer).
         if (frame - self.last_turnover) * DT < TRANSITION_BURST:
@@ -699,10 +780,12 @@ class Match:
         count = 2 if self.press[defenders].mean() > 0.55 else 1
         options = np.flatnonzero(self.active & (self.team == side) & ~self.keeper)
         forward_option = options[np.argmax(self.pos[options, 0] * s)]
+        shooting = np.linalg.norm(self.goal_of(side) - ball_target) < SHOOTING_RANGE
+        count = 2 if shooting else count
         for k in order[:count]:
-            if np.linalg.norm(self.pos[k] - ball_target) > 18 * min(self.drive[k], 1.4) * (0.6 + 0.8 * self.press[k]):
+            if not shooting and np.linalg.norm(self.pos[k] - ball_target) > 18 * min(self.drive[k], 1.4) * (0.6 + 0.8 * self.press[k]):
                 continue
-            screen = self.pos[forward_option] - ball_target
+            screen = (self.goal_of(side) if shooting else self.pos[forward_option]) - ball_target
             screen = screen / max(np.linalg.norm(screen), 1e-6) * 1.6 * self.press[k]
             targets[k] = ball_target + screen
             urgency[k] = min(1.0, (0.45 + 0.45 * self.press[k]) * self.drive[k])
@@ -710,14 +793,14 @@ class Match:
 
     def restart_targets(self, targets: np.ndarray, urgency: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Where players set up for a restart: the taker on the ball; for a penalty everyone else
-        outside the box and the keeper on the line; for a corner both teams in the box; and
-        opponents WALL_DISTANCE from a free kick or corner."""
+        outside the box and WALL_DISTANCE from the spot, and the keeper on the line; for a corner
+        both teams in the box; and opponents WALL_DISTANCE from a free kick or corner."""
         r = self.restart
         side, spot, kind = r["side"], r["spot"], r["kind"]
         s, goal = self.side_sign(side), self.goal_of(side)
         outfield = self.active & ~self.keeper
         if kind == "PENALTY":
-            edge = goal[0] - s * (BOX_DEPTH + 1)
+            edge = goal[0] - s * (BOX_DEPTH + SET_MARGIN)
             inside = outfield & ((targets[:, 0] - edge) * s > 0)
             targets[inside, 0] = edge
             keeper = self.active & self.keeper & (self.team != side)
@@ -728,15 +811,31 @@ class Match:
             targets[attack, 1] = W / 2 + 14 * self.lateral[attack]
             targets[defend, 0] = goal[0] - s * (3 + 8 * (1 - self.depth[defend]))
             targets[defend, 1] = W / 2 + 12 * self.lateral[defend]
-        if kind in ("FREE KICK", "CORNER KICK"):
+        if kind in ("FREE KICK", "CORNER KICK", "PENALTY"):
             away = targets - spot
             gap = np.linalg.norm(away, axis=1)
-            close = self.active & (self.team != side) & (gap < WALL_DISTANCE)
-            direction = np.where(gap[:, None] > 1e-6, away / np.maximum(gap, 1e-6)[:, None], [-s, 0.0])
-            targets[close] = spot + direction[close] * (WALL_DISTANCE + 0.4)
+            # A penalty clears every outfielder (the taker is put back on the spot below).
+            kept = self.active & ~self.keeper if kind == "PENALTY" else self.active & (self.team != side)
+            close = kept & (gap < WALL_DISTANCE + SET_MARGIN)
+            reach = WALL_DISTANCE + SET_MARGIN
+            if kind == "PENALTY":                      # straight back from the spot, keeping their line
+                across = targets[close, 1] - spot[1]
+                targets[close, 0] = spot[0] - s * np.sqrt(np.clip(reach ** 2 - across ** 2, 0, None))
+            else:
+                direction = np.where(gap[:, None] > 1e-6, away / np.maximum(gap, 1e-6)[:, None], [-s, 0.0])
+                targets[close] = spot + direction[close] * reach
         targets[:] = np.clip(targets, [0.5, 0.5], [L - 0.5, W - 0.5])
         targets[r["taker"]], urgency[r["taker"]] = spot, 0.8
         return targets, urgency
+
+    def space_taker(self, runner: int, side: int) -> tuple[np.ndarray, int | None]:
+        """(the spot the runner's marker stands on, the teammate nearest it within 18 m) at
+        the start of a run: if the marker follows, that teammate moves into the space."""
+        space = self.pos[self.nearest(1 - side, self.pos[runner], outfield=True)].copy()
+        mates = np.flatnonzero(self.active & (self.team == side) & ~self.keeper)
+        mates = mates[(mates != runner) & (mates != (self.holder if self.holder is not None else -1))]
+        gaps = np.linalg.norm(self.pos[mates] - space, axis=1)
+        return space, int(mates[np.argmin(gaps)]) if len(mates) and gaps.min() < 18 else None
 
     def run_aim(self, k: int, kind: str, side: int) -> np.ndarray:
         """Where player k's off-ball run of `kind` ("in_behind", "wide" or "deep") heads.
