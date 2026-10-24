@@ -92,23 +92,22 @@ flowchart LR
 
 ## The metrics
 
-**Four pillars**
+Off-ball work is measured as four **pillars**:
+- scanning;
+- decoy runs;
+- pressing lane cuts;
+- transitions.
 
-| Pillar | Metric | Definition |
-|---|---|---|
-| Scanning | Scan rate | Quick head turns more than 60° off the ball in the 5 s before receiving |
-| Space | Decoy run value | Extra xT-weighted pitch control teammates gain because the runner's markers followed them. Runs must end level with or ahead of the ball. |
-| Pressing | Lane cuts | Threat-weighted share of the carrier's passing lanes inside the presser's cover shadow, projected 0.5 s ahead |
-| Transition | Reaction score | How fast the player hits a sustained sprint after a turnover near the ball |
+There are also seven **tactical metrics**:
+- pressure intensity;
+- pressures won;
+- receipts in space;
+- defensive responsibility;
+- off-ball scoring opportunity (OBSO);
+- run types;
+- pitch control.
 
-**Five tactical metrics:**
-- Pressure Intensity
-- Ball Receipts in Space
-- Defensive Responsibility
-- Off-Ball Scoring Opportunity (OBSO)
-- Run types: in behind, pulling wide, dropping deep
-
-Definitions are in [docs/off_ball_metrics.md](docs/off_ball_metrics.md). The two indexes are documented in [docs/composite_index.md](docs/composite_index.md) and [docs/impact_index.md](docs/impact_index.md).
+These combine into the Off-Ball Index. [How every number is calculated](#how-every-number-is-calculated) explains each one.
 
 ### Do the metrics work?
 
@@ -125,6 +124,107 @@ The simulator gives every player hidden talents that the metrics never see. The 
 | Pressures won vs pressing | 0.45 |
 
 Receivers who made no head check kept the ball 75% of the time, against 83% with 3+ checks (7,636 receptions).
+
+## How every number is calculated
+
+Every number comes from two inputs:
+- **tracking:** where all 22 players and the ball are, 25 times a second, in metres;
+- **the event log:** passes, shots, tackles, fouls, set pieces and so on.
+
+All thresholds live in [`core/config.py`](core/config.py). Longer write-ups are in [docs/off_ball_metrics.md](docs/off_ball_metrics.md), [docs/composite_index.md](docs/composite_index.md) and [docs/impact_index.md](docs/impact_index.md).
+
+### Building blocks
+
+| Term | How it's calculated |
+|---|---|
+| **Possession** | The team of the most recent on-ball event (pass, shot, recovery, ball lost or set piece) owns the ball. It stays theirs until the ball goes dead: out of play, a foul, an offside or a goal. |
+| **Expected threat (xT)** | How likely a spot on the pitch is to lead to a goal. It uses Karun Singh's model, learned from this league's own passes, carries and shots on a 16 × 12 grid. A zone's value is the chance of scoring from it directly, plus the value of where the ball usually goes next. |
+| **Pitch control** | For any point, a logistic curve of (distance to the nearest defender − distance to the nearest attacker) ÷ 3 m. Whoever is clearly closer controls it, and control fades smoothly in between (a "soft Voronoi"). |
+| **Speed** | Frame-to-frame movement, smoothed over 0.3 s. Anything faster than 43 km/h is treated as a tracking glitch. |
+
+### Live Match
+
+| Stat | How it's calculated |
+|---|---|
+| **Score, shots, on target** | Shot events up to the current minute. On target means scored or saved; a blocked shot doesn't count. |
+| **Possession %** | Each team's share of the frames so far in which the ball was in play. Dead-ball time doesn't count for anyone. |
+| **Passes, pass accuracy** | Every pass, including intercepted ones. Accuracy is the share that reached a teammate. |
+| **Pass difficulty (0–100)** | 100 × (0.6 × lane + 0.2 × pressure + 0.2 × forward). It uses only what's known when the ball is struck. See below. The table shows the average over completed passes. |
+| **Shot speed** | The ball's fastest frame-to-frame speed between the strike and where the shot ends, in km/h. |
+| **Fouls, yellow cards, corners, offsides** | Counted from the event log. A foul is charged to the team that committed it. |
+| **Game rhythm: control** (top bars) | For each 3-minute spell: the home team's share of the ball in play, minus 50%. Bars above the line are spells the home team controlled; bars below are the away team's. |
+| **Game rhythm: chaos** (bottom bars) | For each spell: how many times possession switched teams, including through restarts such as throw-ins. Tall bars mean scrappy, end-to-end football. |
+| **Commentary "why"** | Each line explains its own event: a goal's assist (pass length and difficulty) and the off-ball work in its build-up, the foul behind a card, or a key moment's measured detail. |
+| **Overlay feed (JSON)** | The same feed, machine-readable. Each item has its time, clock, type, team, player, text, reason, and how long to show it: 8 s for key events, 5 s for detail. |
+
+**Pass difficulty parts**, each from 0 to 1:
+- **lane:** 1 − (gap between the pass's line and the nearest opponent) ÷ 5 m;
+- **pressure:** 1 − (nearest opponent to the passer) ÷ 5 m;
+- **forward:** how directly the pass heads for goal (1 = straight at goal, 0 = square or backwards).
+
+It's validated on matches it wasn't tuned on. Failure rises steadily with difficulty: 0.5% of passes rated 0–15 fail, against 36% of those rated 60+. Length isn't used, because an intercepted pass's intended length is unknown.
+
+### Tactical Playback
+
+| Element | How it's calculated |
+|---|---|
+| **Followed player tags** | Distance covered since the clip began, plus their speed whenever they're at 20 km/h or faster (a sprint). |
+| **Ball speed tag** | Shown whenever the ball moved faster than 70 km/h over the last frame: shots and the hardest-hit passes. |
+| **Head-check cones** (yellow) | A head check is a quick turn of the head (at least 90°/s) to more than 60° away from the ball, lasting 0.1–2 s. |
+| **Cover shadows and pink lanes** | The passing lanes from the ball carrier that a presser within 15 m blocks. See *Lane cuts*. |
+| **Key moments / highlight clips** | Up to 8 of each kind per match, at least 15 s apart. See below. |
+
+**What counts as a key moment:**
+- **Decoy runs:** the runs that created the most xT.
+- **Presses:** spells keeping at least 50% of the threat-weighted lanes cut for at least 1 s.
+- **Transitions:** sprints within 1.5 s of a turnover. Under 0.2 s doesn't count, because the player was already sprinting.
+- **Scans:** receptions kept after at least 3 head checks.
+
+### The four pillars (per player)
+
+| Pillar | How it's calculated |
+|---|---|
+| **Scan rate** | Head checks per second in the 5 s before each completed pass the player receives. A reception is skipped if head data covers less than 60% of that window. |
+| **Decoy run value** (xT per 90) | The space a run opens for teammates. See the rules below. |
+| **Pressing lane cuts** (s per 90) | On every frame the player is within 15 m of the carrier, the share of the carrier's passing lanes that their "cover shadow" blocks. See below. Summed over time, per 90 minutes. |
+| **Transition score** | e^(−latency ÷ 2 s) − 0.5 × (share of the next 10 s spent walking, under 7 km/h). Latency is the seconds from a turnover to a sprint of 20 km/h or faster held for 1 s. Only players within 30 m of the ball at the turnover are judged. **Transition latency** is the median over turnovers where the player did sprint. |
+
+**Decoy run rules.** A run must:
+- be at least 15 km/h, for 1 s or longer, over 8 m or more;
+- be made while the team has the ball;
+- end level with or ahead of the ball;
+- start more than 3 s after the team won the ball (earlier ones count as transitions).
+
+Its value is the extra xT-weighted pitch control teammates gain because the runner's markers followed. Markers are defenders who had the runner as their nearest attacker for at least 60% of the run and moved with them. The comparison is with those markers having stayed with their defensive block. A run is never scored below zero.
+
+**Lane cuts.** The cover shadow is a cone from the carrier through the presser's position 0.5 s ahead. Each lane is weighted by the receiver's xT × how open that receiver is.
+
+### Tactical metrics (per player, per 90 minutes unless stated)
+
+| Metric | How it's calculated |
+|---|---|
+| **Pressure intensity** | Pressure spells are at least 0.4 s within 10 m of the ball carrier, closing faster than 5 km/h. Intensity adds up closing speed × (1 − distance ÷ 10 m) × time, so ground made up from close counts more. |
+| **Pressures won** | A pressure is *won* if, within 3 s of it ending, the presser's team gets the ball: by a tackle, an interception, or the pressed team passing it out of play. A player is credited once per win; several teammates pressing the same carrier are each credited. **Press win rate** is the share of a player's pressures won. |
+| **Receipts in space** | The share of completed receptions where the nearest opponent was at least 5 m away when the ball arrived. |
+| **Defensive responsibility** (lower is better) | Each player's zone is their usual offset from the team's centre at that moment. Every opponent pass that gains xT is charged to the zones near where it ends, shared by distance (Gaussian, 8 m). |
+| **OBSO** (off-ball scoring opportunity) | Every 0.2 s in possession, for each attacker off the ball: xT of their spot × tanh(distance to the nearest defender ÷ 6 m) × e^(−distance from the ball ÷ 25 m). It counts whether or not the pass came. |
+| **Run types** | Each run, measured against the team's own movement, needs at least 4 m with one direction holding 60% of it. It's *in behind* if it heads for goal and ends within 2 m of the last defender or past him, *pulling wide* if it heads for the touchline, and *dropping deep* if it comes back towards the ball. These describe style, not quality. |
+| **Pitch control %** | Sampled every second while the team has the ball: the share of the pitch (on a 2 m grid) that goes to that player. Each cell goes to its nearest attacker, weighted by the team's control of it. |
+
+### Scores and models
+
+| Score | How it's calculated |
+|---|---|
+| **Pillar score** | The mean percentile of the four pillars among the players shown. |
+| **Off-Ball Index** (0–100, the headline) | Ten metrics in five categories: spacing, movement, creation, scanning and defence. Each metric becomes a percentile among players in the same position. It's pulled towards 50 on a small sample, by n ÷ (n + k), where n is the player's minutes, receptions or transitions. Each category is the mean of its metrics, and the index is the mean of the categories. Under 90 minutes, there's no index. In match views it's computed within that match. |
+| **Off-Ball Impact** | The five tactical metrics, weighted by how much each moves the team's shot difference across 5-minute windows. The weights come from a non-negative regression, after taking out possession share. Players are scored like the Off-Ball Index. |
+| **ML price** | ln(price) = c + Σ 0.03 × tree_t(x), over 300 small gradient-boosted trees. x is the five off-ball metrics and the player's position. Each player is priced by a model trained on the *other* four-fifths of the league. The Player Profile breaks each price down step by step. |
+| **Role (ML cluster)** | K-means (k = 4) on the standardised off-ball metrics. Each cluster is named after the metric it leads on. |
+| **Similar players** | Distance on the four pillars, z-scored within position. Similarity = 1 ÷ (1 + mean distance). |
+| **Team battle** | Each club's share of the two clubs' combined total on each metric. Labels show the raw values. |
+| **Intensity by period** | Each club's off-ball totals in every 15-minute block. |
+| **Model Check** | Spearman rank correlation between each metric and the hidden talent it should reflect, comparing players only with their own position. The 95% interval comes from 1,000 bootstrap resamples. The verdict is strong at 0.5 or above, moderate at 0.3, weak at 0.1. |
+| **Scanning effect** | The share of receptions where the team kept the ball, by the number of head checks in the 5 s before (0, 1, 2, 3+), with Wilson 95% intervals. |
 
 ## Run it locally
 
