@@ -4,7 +4,7 @@ Off-ball valuation dashboard for a synthetic, football-realistic league.
     Tactical Playback   a Football-Manager-style 2D pitch that plays the 25 Hz
                         tracking in the browser, with Key Moments to jump to,
                         head-check cones, and pitch-control / xT overlays on paused frames.
-    Match Leaderboards  every player in the selected match ranked by Off-Ball Value,
+    Match Leaderboards  every player in the selected match ranked by the Off-Ball Index,
                         with the team battle, intensity by period and a moments timeline.
     Player Profile      one player's four pillars against their position, match by
                         match, with the most similar players in the league.
@@ -13,7 +13,10 @@ Off-ball valuation dashboard for a synthetic, football-realistic league.
                         (core.composite), or the five tactical metrics weighted by their
                         impact on shots (core.impact); rankings and attribute polygons.
     Value Finder        every outfielder across the league: market value against
-                        Off-Ball Value, with median lines marking the "Moneyball" quadrant.
+                        the Off-Ball Index, with median lines marking the "Moneyball" quadrant.
+
+The headline score is the Off-Ball Index. The Pillar score (column off_ball_value) is the
+plain mean of the four pillar percentiles, kept as a building block.
     AI Scout            questions about the league's off-ball work, answered from the data.
     Model Check         do the metrics recover the hidden talents the simulation gave
                         each player, and does scanning really keep the ball?
@@ -61,7 +64,7 @@ ROLE_STYLE = {"Space creator": ("#2a78d6", "circle"), "Lane-cutting presser": ("
               "Scanner": ("#e87ba4", "star")}
 OTHER_ROLE = ("#8a8a8a", "x")      # a second cluster led by the same metric ("Scanner 5")
 # Value Finder y axes: label -> (column, higher is better).
-Y_AXES = {"Off-Ball Index": ("index", True), "Off-Ball Impact": ("impact_index", True), "Off-Ball Value": ("off_ball_value", True), "ML predicted value": ("Predicted_Value", True),
+Y_AXES = {"Off-Ball Index": ("index", True), "Off-Ball Impact": ("impact_index", True), "Pillar score": ("off_ball_value", True), "ML predicted value": ("Predicted_Value", True),
           "OBSO /90": ("obso_p90", True), "Pressure Intensity /90": ("pressure_intensity", True),
           "Runs in behind /90": ("runs_in_behind_p90", True),
           "Receipts in space": ("receipts_in_space_pct", True),
@@ -195,6 +198,20 @@ def value_models(signature: tuple, pool_minutes: int, by_position: bool):
 SCOUT_POOL_MINUTES = 30          # the AI Scout sees the same pool as the Value Finder's default
 
 
+def match_index(board: pd.DataFrame, min_minutes: float) -> pd.DataFrame:
+    """`board` (one match, after pipeline.off_ball_value) with the Off-Ball Index within that match.
+
+    Same method as the league index, compared within position across both teams, with
+    samples sized for one match: shrinkage at 30 minutes, 3 receptions, 3 transitions.
+    """
+    config = copy.deepcopy(INDEX_CONFIG) | {"min_minutes": min_minutes}
+    for category in config["categories"].values():
+        for spec in category["metrics"].values():
+            spec["min_sample"] = 30 if spec["sample"] == "minutes" else 3
+    scored = composite.composite(board.assign(season="match"), config)
+    return board.assign(index=scored["index"])
+
+
 @st.cache_data(show_spinner=False)
 def match_facts(signature: tuple, game: str) -> MatchFacts:
     """The verified, numbered facts of one match that the report agents work from."""
@@ -204,6 +221,7 @@ def match_facts(signature: tuple, game: str) -> MatchFacts:
     timeline = roster.static_timeline(profiles, league_names(signature), key="uid")
     board = pipeline.player_totals(events, timeline)
     board = pipeline.off_ball_value(board[(board["minutes"] >= 20) & (board["broad_position"] != "Goalkeeper")])
+    board = match_index(board, 20)
     raw_events = tracking.load_events(GAMES[game] / f"{game}_RawEventsData.csv")
     return build_match_facts(game, raw_events, pipeline.load_roster(GAMES[game]),
                              game_moments(signature, game), board, tables=events)
@@ -309,7 +327,7 @@ def value_finder_figure(pool: pd.DataFrame, log_x: bool, axis: str) -> go.Figure
         finds = pool[(pool["market_value_m"] < x_median) & better] \
             .sort_values(y_col, ascending=not higher).head(3)
         headline = (f"<b>Moneyball</b>: below-median value, {'above' if higher else 'below'}-median "
-                    f"{'Off-Ball Value' if percentile else axis}")
+                    f"{axis}")
 
     metric_line = "" if percentile or predicted else f"{axis}: %{{y:.3~f}}<br>"
     present = list(pool["Cluster_Role"].dropna().unique())
@@ -320,12 +338,13 @@ def value_finder_figure(pool: pd.DataFrame, log_x: bool, axis: str) -> go.Figure
             x=group["market_value_m"], y=group[y_col], mode="markers", name=role,
             marker=dict(size=11, color=colour, symbol=symbol, line=dict(width=1.5, color="white")),
             customdata=np.column_stack([group["name"], group["real_team"].fillna(""), group["broad_position"],
-                                        group["minutes"].round(0), group["off_ball_value"].round(0),
+                                        group["minutes"].round(0), group["index"].round(0).astype(object)
+                                        .where(group["index"].notna(), "–"),
                                         group["Predicted_Value"].round(1), group["decoy_p90"].round(3),
                                         group["lane_cut_p90"].round(1), group["pitch_control_pct"].round(1),
                                         group["scan_rate"].round(2)]),
             hovertemplate=("<b>%{customdata[0]}</b> (%{customdata[1]}, %{customdata[2]})<br>" + metric_line +
-                           "Value €%{x:.1f}m · ML price €%{customdata[5]}m · Off-Ball Value %{customdata[4]}<br>"
+                           "Value €%{x:.1f}m · ML price €%{customdata[5]}m · Off-Ball Index %{customdata[4]}<br>"
                            "Decoy /90 %{customdata[6]} · Lane cuts /90 %{customdata[7]} s · "
                            "Scans %{customdata[9]}/s · Pitch control %{customdata[8]}%<br>"
                            "%{customdata[3]} min<extra></extra>")))
@@ -337,7 +356,9 @@ def value_finder_figure(pool: pd.DataFrame, log_x: bool, axis: str) -> go.Figure
     axis_range = lambda title: dict(title=title, type="log" if log_x else "linear", zeroline=False,
                                     range=[np.log10(low), np.log10(high)] if log_x else [0, high])
     y_title = {"Predicted_Value": "ML-predicted value from off-ball work (€m)",
-               "off_ball_value": "Average Off-Ball Value per 90 (percentile score)"}.get(
+               "off_ball_value": "Pillar score (mean percentile of the four pillars)",
+               "index": "Off-Ball Index (0-100, within position)",
+               "impact_index": "Off-Ball Impact (0-100, within position)"}.get(
         y_col, f"{axis}{'' if higher else ' (lower is better)'}")
     fig.update_layout(
         height=600, margin=dict(l=10, r=10, t=40, b=10), hovermode="closest",
@@ -511,8 +532,12 @@ def leaderboard_columns() -> dict:
             "Position", help="The player's position in the squad; the one "
                              "held longest if it changed"),
         "minutes": st.column_config.NumberColumn("Minutes", format="%.0f"),
+        "index": st.column_config.ProgressColumn(
+            "Off-Ball Index", min_value=0, max_value=100, format="%.0f",
+            help="The headline score: nine off-ball metrics in five categories, as percentiles within "
+                 "position (50 = the middle). Blank for goalkeepers and players under the minutes floor"),
         "off_ball_value": st.column_config.ProgressColumn(
-            "Off-Ball Value", min_value=0, max_value=100, format="%.0f",
+            "Pillar score", min_value=0, max_value=100, format="%.0f",
             help="Average percentile across the four pillars: Decoy Run Value, Pressing Lane Cuts, "
                  "Transition score and Scan rate"),
         "decoy_runs": st.column_config.NumberColumn("Off-ball runs", format="%d"),
@@ -578,7 +603,7 @@ INTENSITY_METRICS = {"lane_cut_seconds": "Pressing lane-cut seconds", "sprints":
                      "pressure_intensity": "Pressure intensity (m closed down)",
                      "obso": "Off-ball scoring opportunity (xT·s)"}
 
-METRIC_COLUMNS = ["minutes", "off_ball_value", "receptions", "scan_rate", "pre_reception_scans",
+METRIC_COLUMNS = ["minutes", "index", "off_ball_value", "receptions", "scan_rate", "pre_reception_scans",
                   "retention_rate", "decoy_runs", "decoy_p90", "lane_cut_p90", "mean_lane_cut",
                   "transitions", "median_latency", "sprint_rate", "transition_score"] + pipeline.TACTICAL_COLUMNS
 
@@ -588,10 +613,11 @@ if page == "Match Leaderboards":
     min_minutes = filters[1].slider("Minimum minutes played", 0, 90, 30)
 
     board = pipeline.player_totals(game_events, timeline)
-    board = board[board["minutes"] >= min_minutes]
+    board = pipeline.off_ball_value(board[board["minutes"] >= min_minutes])
+    board = match_index(board, min_minutes)          # ranked across both teams, then filtered
     if team != "Both":
         board = board[board["team"] == team]
-    board = pipeline.off_ball_value(board)
+    board = board.sort_values(["index", "off_ball_value"], ascending=False, na_position="last")
     board.insert(0, "rank", range(1, len(board) + 1))
 
     columns = (["rank", "name", "metrica_ids"]
@@ -640,7 +666,10 @@ if page == "Match Leaderboards":
   dropping isn't anyone's run), is *in behind* when it heads for goal and ends at or past the last
   defender, *pulling wide* when it heads for the touchline, *dropping deep* when it comes back
   towards the ball. Per 90.
-- **Off-Ball Value**: the mean percentile of the four pillar columns (Decoy Run Value, Pressing
+- **Off-Ball Index**: the headline score, as on the Off-Ball Index page but within this match:
+  nine metrics as percentiles among the match's players in the same position, small samples pulled
+  towards 50 (one match is a small sample), five equally weighted categories. Goalkeepers have none.
+- **Pillar score**: the mean percentile of the four pillar columns (Decoy Run Value, Pressing
   Lane Cuts, Transition score, Scan rate) among the players shown.
 - **Names over time**: every run, pressing frame, transition and scan is credited to the name the
   tracked player carried at that minute, so a player replaced at 64' only gets credit up to 64'.
@@ -816,7 +845,7 @@ if page == "Player Profile":
         tiles[0].metric("Off-Ball Index", "–" if pd.isna(row["index"]) else f"{row['index']:.0f}",
                         help="Composite of nine metrics within position (Off-Ball Index page); blank under "
                              f"{INDEX_CONFIG['min_minutes']} minutes")
-        tiles[1].metric("Off-Ball Value", f"{row['off_ball_value']:.0f}",
+        tiles[1].metric("Pillar score", f"{row['off_ball_value']:.0f}",
                         help="Mean percentile of the four pillars across the league's outfielders")
         tiles[2].metric("Market value", f"€{row['market_value_m']:.1f}m")
         tiles[3].metric("ML price", f"€{row['Predicted_Value']:.1f}m",
@@ -860,9 +889,9 @@ if page == "Player Profile":
         st.caption(f"Nearest {row['broad_position'].lower()}s on the four standardised pillars, "
                    "with their price: a like-for-like shortlist.")
         similar = profile["comparables"].merge(
-            pool[["name", "real_team", "market_value_m", "Predicted_Value", "off_ball_value"]],
+            pool[["name", "real_team", "market_value_m", "Predicted_Value", "index", "off_ball_value"]],
             on=["name", "real_team"], how="left")
-        st.dataframe(similar[["name", "real_team", "minutes", "off_ball_value", "market_value_m",
+        st.dataframe(similar[["name", "real_team", "minutes", "index", "off_ball_value", "market_value_m",
                               "Predicted_Value", *analysis.PILLARS, "similarity"]],
                      hide_index=True, width="stretch",
                      column_config=leaderboard_columns()
@@ -879,7 +908,7 @@ if page == "Value Finder":
     y_axis = controls[1].selectbox(
         "Market value against", list(Y_AXES), key="finder-axis",
         help="Off-Ball Index: the composite of nine metrics within position (players with 90+ minutes). "
-             "Off-Ball Value: the four-pillar percentile score. ML predicted value: what a "
+             "Pillar score: the four-pillar percentile score. ML predicted value: what a "
              "gradient-boosted model prices the player at from off-ball work. The others are the "
              "tactical metrics; for Defensive Responsibility lower is better.")
     log_x = controls[2].toggle("Log scale for value", value=False)

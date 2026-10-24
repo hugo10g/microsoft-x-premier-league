@@ -125,7 +125,7 @@ def test_offline_scanning_questions():
 def test_offline_says_when_scanning_data_is_missing():
     agent = OffBallAgent(league().drop(columns=["scan_rate"]), offline=True)
     answer = agent.query("Who scans the most?")
-    assert "no Scanning rate" in answer and "Off-Ball Value" in answer
+    assert "no Scanning rate" in answer and "Pillar score" in answer          # no index in this table
 
 
 def test_header_questions_are_not_scanning_and_empty_rankings_say_so():

@@ -247,3 +247,15 @@ def test_tactical_leaders_and_team_totals_come_from_the_new_tables():
     text = team_offball_text("Away", "Away FC", tables)
     assert "2 runs in behind" in text and "2 m of ground closed down" in text
     assert "0 runs in behind" in team_offball_text("Home", "Home FC", tables)
+
+
+def test_performers_rank_by_the_off_ball_index_when_the_board_has_it():
+    board = pd.DataFrame({"name": ["Bram Ulloa", "Hugo Tanaka", "Nico Vance"],
+                          "real_team": ["Harbourside FC", "Harbourside FC", "Northvale Athletic"],
+                          "index": [55.0, 81.0, np.nan], "off_ball_value": [90.0, 40.0, 99.0]})
+    found = build_match_facts("Test", events(), ROSTER, moments(), board, top=2).of_kind("performer")
+    assert [f.text.split(":")[1].split("(")[0].strip() for f in found] == ["Hugo Tanaka", "Bram Ulloa"]
+    assert "Off-Ball Index 81" in found[0].text
+    pillar_only = build_match_facts("Test", events(), ROSTER, moments(), board.drop(columns="index"), top=1)
+    assert "pillar score 99" in pillar_only.of_kind("performer")[0].text
+    assert pillar_only.score == (1, 1)                         # the match score survives the performer facts

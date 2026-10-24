@@ -4,7 +4,7 @@ AI Scout: a language-model agent that answers scouting questions from the off-ba
     OffBallAgent(global_df).query("Which forward creates the most space with decoy runs?")
 
 How it stays grounded:
-    1. The whole player table (Off-Ball Value, the four pillar metrics: decoy runs,
+    1. The whole player table (Off-Ball Index, Pillar score, the four pillar metrics: decoy runs,
        pressing lane cuts, transition reaction and scanning, plus ML role clusters
        and prices) goes into the context window as CSV, with a plain
        definition of every column, including which direction is "better".
@@ -43,7 +43,7 @@ COLUMNS: dict[str, tuple[str, str]] = {
     "real_team": ("club", "the player's club in the synthetic league"),
     "broad_position": ("position", "Defender, Midfielder or Forward (goalkeepers are excluded)"),
     "minutes": ("minutes", "minutes played across all matches"),
-    "off_ball_value": ("off_ball_value", "0-100 percentile score averaging the four pillars "
+    "off_ball_value": ("pillar_score", "0-100 percentile score averaging the four pillars "
                                          "(decoy runs, pressing, transitions, scanning); higher is "
                                          "better"),
     "index": ("off_ball_index", "0-100 Composite Off-Ball Index: weighted mean of spacing, movement, "
@@ -97,7 +97,8 @@ COLUMNS: dict[str, tuple[str, str]] = {
 
 # (column, best-first sort, label) for the precomputed rankings and the offline answers.
 RANKINGS: list[tuple[str, bool, str]] = [
-    ("off_ball_value", False, "Off-Ball Value"),
+    ("index", False, "Off-Ball Index"),
+    ("off_ball_value", False, "Pillar score"),
     ("decoy_p90", False, "Decoy Run Value per 90 (space created)"),
     ("lane_cut_p90", False, "Pressing Lane Cuts per 90"),
     ("median_latency", True, "Transition Latency in seconds (fastest first)"),
@@ -116,7 +117,8 @@ RANKINGS: list[tuple[str, bool, str]] = [
 
 SYSTEM_PROMPT = """You are AI Scout, an analyst for a football club's recruitment team.
 You answer questions about players' OFF-BALL contribution using only the data provided below.
-Off-Ball Value has four pillars: decoy runs (space created for teammates), pressing lane cuts,
+The headline score is the Off-Ball Index (nine metrics, percentiles within position). The Pillar
+score averages the four pillars: decoy runs (space created for teammates), pressing lane cuts,
 transition reaction (sprinting after a turnover) and scanning (head checks before receiving).
 Five tactical metrics add detail: pressure intensity, receipts in space, defensive responsibility,
 off-ball scoring opportunity (OBSO) and run types (in behind, pulling wide, dropping deep).
@@ -312,11 +314,11 @@ class OffBallAgent:
         text = user_prompt.lower()
         said = lambda word: re.search(rf"\b{re.escape(word)}", text) is not None
         position = next((p for word, p in self.POSITION_WORDS.items() if said(word)), None)
-        column = next((c for words, c in self.METRIC_WORDS if any(said(w) for w in words)), "off_ball_value")
+        column = next((c for words, c in self.METRIC_WORDS if any(said(w) for w in words)), "index")
         spec = next(((c, asc, label) for c, asc, label in RANKINGS if c == column and c in self.df), None)
         if spec is None:
             asked = next((label for c, _, label in RANKINGS if c == column), None)
-            if asked and column != "off_ball_value":
+            if asked and column != "index":
                 note = f"{note} There's no {asked} data yet.".strip()
             spec = next(((c, asc, label) for c, asc, label in RANKINGS if c in self.df), None)
         header = "_Offline answer (no language model used)._"
@@ -330,7 +332,8 @@ class OffBallAgent:
             return f"{header}\n\nNo {position.lower() + 's' if position else 'players'} have data for {label}."
         lines = [f"{k}. **{r['name']}** ({r.get('real_team', '')}, {r.get('broad_position', '')}): "
                  f"{label} {r[column]:.3g}"
-                 + (f", Off-Ball Value {r['off_ball_value']:.0f}" if "off_ball_value" in r and column != "off_ball_value" else "")
+                 + next((f", {name} {r[c]:.0f}" for c, name in (("index", "Off-Ball Index"), ("off_ball_value", "Pillar score"))
+                         if c in r and pd.notna(r[c]) and column != c), "")
                  for k, (_, r) in enumerate(rows.iterrows(), 1)]
         who = f"{position.lower()}s" if position else "players"
         return f"{header}\n\nTop {who} by {label}:\n\n" + "\n".join(lines)

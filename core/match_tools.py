@@ -16,7 +16,7 @@ happened at a moment in time. The facts are about off-ball work first:
                          the attack, the scorer's head checks before receiving
     <moment kinds>       core.moments key moments (decoy, press, transitions, scan)
     pillar_leader        the match's top player in each pillar
-    performer            the highest Off-Ball Values in the match
+    performer            the highest Off-Ball Index scores in the match
 
 The agents may only use these facts; `check_report` verifies that a written report
 cites real moments, credits only the players in the cited facts, gives each of
@@ -373,7 +373,8 @@ def build_match_facts(game: str, events: pd.DataFrame, roster: pd.DataFrame,
 
     events: core.tracking.load_events output; roster: the match's <name>_roster.csv;
     moments: core.moments.key_moments for the match; board: per-player totals for the
-    match after core.pipeline.off_ball_value (name, real_team, off_ball_value, ...);
+    match after core.pipeline.off_ball_value, optionally with an in-match Off-Ball Index
+    ("index"), which then ranks the performers (name, real_team, index, off_ball_value, ...);
     tables: the match's core.pipeline.score_game tables (decoys, pressing, transitions
     and, when present, scanning, pressures, runs and obso). Without tables the off-ball facts that need them
     (team_offball, pillar_leader and most of build_up) are left out.
@@ -440,8 +441,11 @@ def build_match_facts(game: str, events: pd.DataFrame, roster: pd.DataFrame,
         add("pillar_leader", text.format(f"{who} ({club_of(player)})"), player=player, name=who)
 
     if not board.empty and "off_ball_value" in board:
-        for row in board.sort_values("off_ball_value", ascending=False).head(top).itertuples():
-            parts = [f"Off-Ball Value {row.off_ball_value:.0f}"]
+        by_index = "index" in board and board["index"].notna().any()
+        ranked = board.sort_values("index" if by_index else "off_ball_value", ascending=False, na_position="last")
+        for rating, row in zip(ranked["index"] if by_index else ranked["off_ball_value"], ranked.head(top).itertuples()):
+            parts = [f"Off-Ball Index {rating:.0f}" if by_index and pd.notna(rating)
+                     else f"pillar score {row.off_ball_value:.0f}"]
             if pd.notna(getattr(row, "decoy_p90", None)):
                 parts.append(f"Decoy Run Value {row.decoy_p90:.3f} per 90")
             if pd.notna(getattr(row, "lane_cut_p90", None)):

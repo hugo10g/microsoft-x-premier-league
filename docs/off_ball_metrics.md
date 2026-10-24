@@ -42,6 +42,6 @@ Every threshold lives in `core/config.py`. Each metric is computed from 25 Hz tr
 
 | Score | What it is | Method |
 |---|---|---|
-| `off_ball_value` | Mean percentile of the four pillars among the players shown | — |
-| Off-Ball Index | Nine metrics in five equally weighted categories, percentiles within position | [composite_index.md](composite_index.md) |
+| **Off-Ball Index** (headline) | Nine metrics in five equally weighted categories, percentiles within position. In match views it is computed within that match. | [composite_index.md](composite_index.md) |
+| Pillar score (`off_ball_value`) | Mean percentile of the four pillars among the players shown; a building block | — |
 | Off-Ball Impact Index | The five tactical metrics, weighted by their association with shot difference | [impact_index.md](impact_index.md) |
