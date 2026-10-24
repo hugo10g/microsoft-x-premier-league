@@ -2,8 +2,14 @@
 __pycache__/
 .pytest_cache/
 .DS_Store
+
+# Credentials: any .env file except the blank template.
 .env
-# Generated from a fixed seed by scripts/generate_synthetic_league.py (~550 MB).
+.env.*
+!.env.example
+
+# The league (~550 MB) and its precomputed scores (~380 MB), rebuilt by
+# scripts/generate_synthetic_league.py and scripts/precompute_scores.py.
 data/synthetic/
-# Written by scripts/composite_index.py.
+# Index rankings and radar data written by scripts/composite_index.py and impact_index.py.
 outputs/
