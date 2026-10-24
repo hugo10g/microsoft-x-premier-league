@@ -3,7 +3,7 @@ import pandas as pd
 
 from core import pipeline
 from core.pillars.obso import frame_obso
-from core.pillars.pressure import closing_speed, pressures
+from core.pillars.pressure import closing_speed, press_wins, pressures
 from core.pillars.receipts import receipts_in_space
 from core.pillars.responsibility import base_offsets, zone_shares
 from core.pillars.run_types import classify
@@ -41,6 +41,52 @@ def test_a_sprint_at_the_carrier_is_one_pressure_with_intensity():
     row = found.iloc[0]
     assert row["peak_closing_kmh"] > 18 and row["min_distance"] < 2
     assert 0 < row["intensity"] < 8                                  # metres closed, weighted by proximity
+
+
+def test_a_press_is_won_only_by_a_real_regain_soon_enough_and_names_who_won_it():
+    spells = pd.DataFrame({"player": ["Away_2", "Away_3", "Away_4", "Home_5"], "carrier": ["Home_1", "Home_1", "Home_1", "Away_9"],
+                           "start_time": [10.0, 30.0, 50.0, 70.0], "duration": [1.0, 1.0, 1.0, 1.0]})
+    events = pd.DataFrame({
+        "Type": ["RECOVERY", "RECOVERY", "RECOVERY", "RECOVERY"],
+        "Subtype": ["THEFT", "INTERCEPTION", "INTERCEPTION", "SAVED SHOT"],
+        "Team": ["Away", "Away", "Away", "Home"], "Start Time [s]": [11.5, 33.5, 60.0, 71.0],
+        "From": ["Away_2", "Away_7", "Away_4", "Home_1"], "To": None})
+    events["Start Frame"] = (events["Start Time [s]"] * 25).astype(int)
+    out = press_wins(spells, events)                                  # win_window = 3 s after the spell ends
+    assert out["press_win"].tolist() == [True, True, False, False]   # own tackle; teammate's interception;
+    assert out["regained_by"].tolist()[:2] == ["Away_2", "Away_7"]   # 9 s too late; a keeper's save isn't a press win
+    assert out["regained_by"].isna().tolist()[2:] == [True, True]
+    assert out["won_how"].tolist()[:2] == ["tackle", "interception"]
+    assert press_wins(spells, events.iloc[:0])["press_win"].eq(False).all()     # no regains: nothing won
+    broken = pd.DataFrame({"player": ["Away_2", "Away_2", "Away_3"], "carrier": "Home_1",
+                           "start_time": [10.0, 10.8, 10.5], "duration": [0.5, 0.5, 1.0]})
+    once = press_wins(broken, events)                                 # one regain at 11.5 s
+    assert once["press_win"].tolist() == [False, True, True]          # Away_2's last spell only; Away_3 too
+
+
+
+def test_a_pressed_defender_passing_out_of_play_is_a_won_press_but_a_wide_shot_is_not():
+    spells = pd.DataFrame({"player": ["Away_9", "Away_9"], "carrier": ["Home_4", "Home_10"],
+                           "start_time": [20.0, 40.0], "duration": [1.0, 1.0]})
+    events = pd.DataFrame({
+        "Type": ["PASS", "BALL OUT", "SHOT", "BALL OUT"], "Subtype": [None, None, "OFF TARGET-OUT", None],
+        "Team": "Home", "Start Time [s]": [21.2, 22.0, 41.0, 41.8], "From": ["Home_4", "Home_4", "Home_10", "Home_10"],
+        "To": None})
+    events["Start Frame"] = (events["Start Time [s]"] * 25).astype(int)
+    out = press_wins(spells, events)
+    assert out["press_win"].tolist() == [True, False]                 # forced error yes; a missed shot no
+    assert out["won_how"].tolist()[0] == "forced out" and out["regained_by"].isna().all()
+
+
+def test_press_win_rate_is_per_presser_and_unknown_without_pressures():
+    timeline = pd.DataFrame({"player": ["Away_2", "Away_3"], "name": ["A", "B"], "start": [0.0, 0.0], "end": [90.0, 90.0]})
+    table = pd.DataFrame({"minutes": [90.0, 90.0]}, index=pd.Index(["A", "B"], name="name"))
+    pressed = pd.DataFrame({"player": ["Away_2"] * 4, "minute": [1.0, 2.0, 3.0, 4.0], "intensity": 1.0,
+                            "peak_closing_kmh": 15.0, "press_win": [True, False, False, True]})
+    out = pipeline.tactical_totals(table, {"pressures": pressed}, timeline, "player")
+    assert out.loc["A", "press_wins"] == 2 and out.loc["A", "press_win_pct"] == 0.5
+    assert out.loc["A", "press_wins_p90"] == 2 and out.loc["B", "press_wins_p90"] == 0
+    assert out.loc["B", "press_wins"] == 0 and np.isnan(out.loc["B", "press_win_pct"])
 
 
 # ── Ball receipts in space ───────────────────────────────────────────────────

@@ -22,12 +22,14 @@ from core.pillars import obso, pressing, pressure, receipts, responsibility, run
 
 GAMES_DIR = Path(__file__).resolve().parent.parent / "data" / "synthetic"
 # Bump when the shape of score_game's output changes, so cached results are rebuilt.
-VERSION = 8
+VERSION = 9
 PILLARS = ["decoy_p90", "lane_cut_p90", "transition_score", "scan_rate"]
 SCANNING_COLUMNS = ["player", "time", "minute", "n_scans", "scan_rate", "ball_fixation", "retained"]
 OBSO_BUCKET = 10.0         # seconds of OBSO summed into one row
 # The five tactical metrics player_totals adds (per 90 where it says so).
-TACTICAL_COLUMNS = ["pressures", "pressure_intensity", "press_closing_kmh", "receipt_space",
+TACTICAL_COLUMNS = ["pressures", "pressure_intensity", "press_closing_kmh", "press_wins", "press_wins_p90",
+                    "press_win_pct",
+                    "receipt_space",
                     "receipts_in_space_pct", "def_responsibility_p90", "obso_p90",
                     "runs_in_behind_p90", "pulling_wide_p90", "dropping_deep_p90"]
 RUN_TYPE_COLUMNS = {"Run in Behind": "runs_in_behind_p90", "Pulling Wide": "pulling_wide_p90",
@@ -237,7 +239,7 @@ def score_game(game_dir: Path, xt: np.ndarray) -> dict[str, pd.DataFrame]:
 
     keepers = set(load_roster(game_dir).query("position == 'Goalkeeper'")["player"])
     outfield = np.array([pid not in keepers for pid in tr.player_ids])
-    pressed = pressure.pressures(tr, possession, vel)
+    pressed = pressure.press_wins(pressure.pressures(tr, possession, vel), events)
     pressed = pressed.rename(columns={"start_time": "time"}).assign(minute=clock(pressed["start_time"]))
     received = receipts.receipts_in_space(tr, events)
     received = received.assign(minute=clock(received["time"]))
@@ -335,6 +337,9 @@ def tactical_totals(table: pd.DataFrame, events: dict[str, pd.DataFrame], timeli
         table["pressures"] = grouped.size().reindex(table.index).fillna(0)
         table["pressure_intensity"] = per90(grouped["intensity"].sum())
         table["press_closing_kmh"] = grouped["peak_closing_kmh"].mean()
+        table["press_wins"] = grouped["press_win"].sum().reindex(table.index).fillna(0)
+        table["press_wins_p90"] = per90(grouped["press_win"].sum())
+        table["press_win_pct"] = grouped["press_win"].mean()          # NaN for a player who never pressed
     if (received := credit("receipts")) is not None:
         grouped = received.groupby("name")
         table["receipt_space"] = grouped["space"].median()

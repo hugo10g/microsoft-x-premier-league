@@ -17,7 +17,7 @@ Event data records the pass, the shot and the tackle. It misses the run that dra
 | **Tactical Playback** | Any moment of a match on a 2D pitch in the browser, under a scoreboard. Beside the pitch, highlight clips of the goals and each pillar (Scanning, Space, Pressing, Transition) play in one click; overlays show head-check cones, pitch control, xT and the lanes a press cuts. |
 | **Match Leaderboards** | Every player in the match ranked, with the team battle, intensity by 15-minute block and a timeline of key moments. |
 | **Match Report** | A report written by four agents and checked against the match facts. Every cited moment can be watched in the playback. |
-| **Off-Ball Index** | Two 0–100 composite scores with rankings and radar polygons. The **Off-Ball Index** gives equal weight to nine metrics in five categories. The **Off-Ball Impact Index** weights the five tactical metrics by how much they move the team's shot balance. |
+| **Off-Ball Index** | Two 0–100 composite scores with rankings and radar polygons. The **Off-Ball Index** gives equal weight to ten metrics in five categories. The **Off-Ball Impact Index** weights the five tactical metrics by how much they move the team's shot balance. |
 | **Player Profile** | One player against their position: index, polygon, pillar percentiles, match-by-match trend and the most similar players. |
 | **Value Finder** | Market value against off-ball work: a "Moneyball" quadrant and an out-of-fold ML price. |
 | **AI Scout** | Plain-language questions about the league's off-ball work, answered from the same numbers. |
@@ -93,14 +93,15 @@ The simulator gives every player hidden talents that the metrics never see. The 
 
 | Check | ρ |
 |---|---|
-| Scan rate vs awareness | 0.87 |
-| Transition reaction vs work rate | 0.84 |
-| Transition latency vs work rate | −0.84 |
-| Lane cuts vs pressing | 0.43 |
-| Decoy runs vs work rate | 0.21 (weak: carried by forwards; midfielders' decoy value doesn't yet track work rate) |
-| Off-Ball Index vs combined off-ball talents | 0.60 |
+| Scan rate vs awareness | 0.88 |
+| Transition reaction vs work rate | 0.85 |
+| Transition latency vs work rate | −0.76 |
+| Lane cuts vs pressing | 0.52 |
+| Decoy runs vs work rate | 0.38 (carried by forwards at 0.68; midfielders' decoy value doesn't yet track work rate) |
+| Off-Ball Index vs combined off-ball talents | 0.73 |
+| Pressures won vs pressing | 0.62 |
 
-Receivers who made no head check kept the ball 67% of the time, against 79% with 3+ checks (6,838 receptions).
+Receivers who made no head check kept the ball 74% of the time, against 80% with 3+ checks (7,900 receptions).
 
 ## Run it locally
 

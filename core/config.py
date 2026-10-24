@@ -88,6 +88,7 @@ class PressureConfig:
     min_closing_kmh: float = 5.0         # ...while closing them down faster than this
     min_duration: float = 0.4            # a pressure lasts at least this
     control_distance: float = 2.0        # the carrier is the attacker within this of the ball
+    win_window: float = 3.0              # a regain this soon after a pressure ends: the press won it
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from core import pipeline, tracking
-from core.synthetic import make_squad, scan_effect, value_players, write_match
+from core.synthetic import DT, Match, make_squad, scan_effect, value_players, write_match
 
 
 def test_synthetic_match_loads_with_full_teams(tmp_path):
@@ -74,3 +74,20 @@ def test_league_xt_rises_towards_goal():
     xt = pipeline.learn_xt()
     assert xt[:, -4:].mean() > 5 * xt[:, :4].mean()
     assert np.unravel_index(xt.argmax(), xt.shape)[1] >= xt.shape[1] - 2   # peak next to goal
+
+
+def test_the_ball_never_teleports_and_longer_passes_are_struck_harder():
+    rng = np.random.default_rng(2)
+    used: set = set()
+    home, away = make_squad("Test A", "4-3-3", rng, used), make_squad("Test B", "4-4-2", rng, used)
+    value_players(home + away, rng)
+    match = Match(home, away, seed=3, half_minutes=6)
+    frames, positions, ball, events = match.run()
+    same_half = frames["Period"].to_numpy()[1:] == frames["Period"].to_numpy()[:-1]
+    speed = np.linalg.norm(np.diff(ball, axis=0), axis=1)[same_half] / DT
+    assert speed.max() < 40                                          # m/s: a hard shot, never a jump
+    passes = events[events["Type"] == "PASS"]
+    flight = passes["End Time [s]"] - passes["Start Time [s]"]
+    length = np.hypot((passes["End X"] - passes["Start X"]) * 105, (passes["End Y"] - passes["Start Y"]) * 68)
+    assert flight[length > 30].median() > flight[length < 10].median()   # long balls take longer...
+    assert (length / flight)[length > 30].median() > (length / flight)[length < 10].median()   # ...but are struck harder

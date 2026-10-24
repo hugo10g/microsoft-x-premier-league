@@ -9,7 +9,10 @@ transitions, and an aware player should scan more before receiving.
 
 The match engine, frame by frame:
     ball        held by a player, in flight (pass or shot), or dead (out of play,
-                goal) until a restart; the holder decides when to pass, shoot or carry
+                goal) until a restart; the holder decides when to pass, shoot or carry,
+                sooner under pressure. A struck ball slows as it travels; it rolls into
+                the receiver's stride, a save ends in the keeper's hands, a goal in the
+                net, and a dead ball is brought back to its restart spot (never teleported)
     shape       each team holds its formation slots, a block that slides with the
                 ball: higher and wider in possession, deeper and narrower without it
     roles       the nearest defenders press the ball, attackers make forward runs
@@ -129,7 +132,7 @@ PRESS_DRIVE = {"Defensive Midfield": 1.8, "Central Midfield": 1.2, "Centre-Forwa
 # 2.8 goals (a Premier League season's rates): how readily a player shoots from a
 # given distance, and how often an on-target shot beats the keeper.
 SHOT_TENDENCY = 0.75
-FINISH_FACTOR = 1.05
+FINISH_FACTOR = 1.23
 # After a turnover, players near the ball react after REACTION_BASE + REACTION_SLOW *
 # (1 - work rate) seconds, plus a random REACTION_JITTER (mean, s) per turnover, then sprint
 # for TRANSITION_BURST s: attackers forward into space, defenders back goal-side of the ball.
@@ -138,6 +141,19 @@ TRANSITION_BURST, TRANSITION_RADIUS = 2.5, 30.0
 SCAN_MEMORY = 5.0                 # seconds of checks a receiver benefits from
 # Checks in that memory (0, 1, 2, 3+) -> (dispossession multiplier, pass-success logit shift).
 SCAN_EFFECTS = {0: (1.4, -0.3), 1: (0.6, 0.25), 2: (0.45, 0.45), 3: (0.35, 0.65)}
+# Ball physics. A struck ball slows at a constant rate (grass and air), so a flight covers
+# s(t) = v0·t - a·t²/2: passes are struck harder the longer they are, shots harder still.
+# A held ball moves to its holder's feet at up to CONTROL_SPEED, so a pass rolls into the
+# receiver's stride instead of snapping to them.
+PASS_DECEL, SHOT_DECEL = 1.6, 3.0          # m/s²
+CONTROL_SPEED = 12.0                       # m/s
+NET_DEPTH, MISS_RUN_ON = 1.5, 4.0          # m a goal carries into the net; a miss runs past the line
+RESTART_PAUSE, RETURN_SPEED = 1.5, 10.0    # s a dead ball rests, then m/s back to its restart spot
+# Release: time on the ball grows with the room around the holder (pressed players play
+# early, free ones carry) and shrinks for better passers. ONE_TOUCH of pressed receptions
+# are first-time passes, and a holder closed down to PRESSURE_RELEASE m plays within a
+# reaction time.
+ONE_TOUCH, PRESSURE_RELEASE = 0.15, 2.0
 
 
 def wrap_degrees(angle):
@@ -250,6 +266,7 @@ class Match:
         self.busy_until = np.zeros(n, dtype=int)      # end of the return to the ball
         self.check_onsets: list[list[int]] = [[] for _ in range(n)]
         self.holder_checks: int | None = None         # the holder's checks before receiving
+        self.next_decision, self.rushed = 0, False    # when the holder acts; already closed down?
         self.events: list[dict] = []
         self.schedule_substitutions()
 
@@ -319,6 +336,27 @@ class Match:
         taker = self.nearest(self.possession, self.ball, outfield=True)
         self.pos[taker] = self.ball + np.array([-0.8 * self.side_sign(self.possession), 0])
 
+    def strike(self, kind: str, here: np.ndarray, to: np.ndarray, v0: float, decel: float, frame: int,
+               **fields) -> dict:
+        """A flight from `here` to `to`, struck at v0 m/s and slowing at `decel` m/s² (raised if
+        needed so it always arrives)."""
+        distance = float(np.linalg.norm(to - here))
+        v0 = max(v0, 1.05 * np.sqrt(2 * decel * distance))
+        seconds = (v0 - np.sqrt(v0 ** 2 - 2 * decel * distance)) / decel
+        return {"kind": kind, "from": here, "to": to, "start": frame, "end": frame + max(2, int(np.ceil(seconds * FPS))),
+                "v0": v0, "decel": decel, **fields}
+
+    def hold_frames(self, k: int) -> int:
+        """Frames player k keeps a ball they've just won or received (see ONE_TOUCH)."""
+        rivals = self.active & (self.team != self.team[k])
+        room = float(np.min(np.linalg.norm(self.pos[rivals] - self.pos[k], axis=1)))
+        if room < 6 and self.rng.random() < ONE_TOUCH:
+            seconds = self.rng.uniform(0.2, 0.45)
+        else:
+            mean = (0.8 + 0.25 * min(room, 12)) * (1.3 - 0.6 * self.players[k].passing)
+            seconds = self.rng.gamma(2.0, mean / 2)
+        return int(seconds * FPS)
+
     def nearest(self, side: int, point: np.ndarray, outfield: bool = False, exclude=None) -> int:
         mask = self.active & (self.team == side)
         if outfield:
@@ -333,7 +371,7 @@ class Match:
     def choose_action(self, frame: int) -> None:
         holder, side = self.holder, self.possession
         p = self.players[holder]
-        here = self.pos[holder].copy()
+        here = self.ball.copy()                            # at the holder's feet
         goal = self.goal_of(side)
         to_goal = goal - here
         distance = float(np.linalg.norm(to_goal))
@@ -342,7 +380,8 @@ class Match:
         lose_factor, pass_shift = scan_effect(self.holder_checks)
         self.holder_checks = None
 
-        if distance < 32 and self.rng.random() < SHOT_TENDENCY * np.clip(0.36 - distance / 90, 0.03, 0.3):
+        in_front = to_goal[0] * self.side_sign(side) > 0.5          # not from on or behind the goal line
+        if in_front and distance < 32 and self.rng.random() < SHOT_TENDENCY * np.clip(0.36 - distance / 90, 0.03, 0.3):
             angle = float(np.arctan2(7.32 * abs(to_goal[0]), to_goal @ to_goal - 3.66 ** 2))
             chance = goal_probability(distance, angle) * (0.6 + 0.8 * p.finishing)
             # Aim error grows with distance and shrinks with finishing: about a third of
@@ -350,10 +389,22 @@ class Match:
             # conversion near a real league's (about one shot in ten).
             aim = goal + np.array([0, self.rng.normal(0, (4.0 + distance / 5) * (1.3 - 0.6 * p.finishing))])
             on_target = abs(aim[1] - W / 2) < 3.66
-            self.flight = {"kind": "shot", "from": here, "to": aim, "start": frame,
-                           "end": frame + max(8, int(distance / 24 * FPS)), "on_target": on_target,
-                           "goal": on_target and self.rng.random() < min(0.9, chance * FINISH_FACTOR),
-                           "shooter": holder}
+            scores = on_target and self.rng.random() < min(0.9, chance * FINISH_FACTOR)
+            keepers = np.flatnonzero(self.keeper & self.active & (self.team == 1 - side))
+            keeper = int(keepers[0]) if len(keepers) else self.nearest(1 - side, goal)
+            line = aim - here
+            heading = line / max(np.linalg.norm(line), 1e-6)
+            if scores:                                     # on into the net
+                to = aim + heading * NET_DEPTH / max(abs(heading[0]), 0.2)
+            elif on_target:                                # where the keeper meets it
+                reach = np.clip(((self.pos[keeper] - here) @ line) / max(line @ line, 1e-6), 0.7, 1.0)
+                to = here + reach * line
+            else:                                          # wide, on past the line
+                to = aim + heading * MISS_RUN_ON / max(abs(heading[0]), 0.2)
+            to[1] = np.clip(to[1], -2.0, W + 2.0)
+            power = 22 + 8 * p.finishing + self.rng.normal(0, 2)
+            self.flight = self.strike("shot", here, to, power, SHOT_DECEL, frame, on_target=on_target,
+                                      goal=scores, shooter=holder, keeper=keeper)
             self.holder = None
             return
         if pressure < 1.6 and self.rng.random() < 0.35 * (1.1 - p.passing) * lose_factor:
@@ -376,20 +427,20 @@ class Match:
         lane = float(gaps.min())
         success = 1 / (1 + np.exp(-(1.4 + 1.6 * (lane - 1.1) + 2.2 * (p.passing - 0.5) - length[pick] / 30
                                     + pass_shift)))
-        duration = max(8, int(length[pick] / 16 * FPS))
-        flight = {"kind": "pass", "from": here, "start": frame, "end": frame + duration,
-                  "passer": holder, "receiver": receiver, "to": end}
+        v0 = min(9 + 0.3 * length[pick], 26.0)
+        flight = self.strike("pass", here, end, v0, PASS_DECEL, frame, passer=holder, receiver=receiver)
         if self.rng.random() > success:
             if self.rng.random() < 0.3:                            # overhit: out of play
                 out = here + seg * 1.6
                 out[1] = np.clip(out[1], -1.5, W + 1.5)
                 if 0 < out[1] < W:
                     out[1] = -1.0 if out[1] < W / 2 else W + 1.0
-                flight.update(kind="out", to=out, end=frame + int(duration * 1.4))
+                flight = self.strike("out", here, out, 1.15 * v0, PASS_DECEL, frame, passer=holder,
+                                     receiver=receiver)
             else:
                 k = int(np.argmin(gaps))
-                flight.update(kind="intercepted", to=closest[k], interceptor=int(opponents[k]),
-                              end=frame + max(4, int(duration * t[k])))
+                flight = self.strike("intercepted", here, closest[k], v0, PASS_DECEL, frame, passer=holder,
+                                     receiver=receiver, interceptor=int(opponents[k]))
         self.flight, self.holder = flight, None
         self.receiver = flight.get("receiver")
 
@@ -435,7 +486,7 @@ class Match:
             self.log(side, "PASS", "", f["start"], frame, f["passer"], f["receiver"], f["from"], f["to"])
             self.holder = f["receiver"]
             self.holder_checks = self.recent_checks(f["receiver"], frame)
-            self.next_decision = frame + int((0.6 + self.rng.exponential(1.8)) * FPS)
+            self.next_decision, self.rushed = frame + self.hold_frames(f["receiver"]), False
         elif f["kind"] == "intercepted":
             self.log(side, "BALL LOST", "INTERCEPTION", f["start"], frame, f["passer"], None, f["from"], f["to"])
             self.log(1 - side, "RECOVERY", "INTERCEPTION", frame, frame, f["interceptor"], None, f["to"], f["to"])
@@ -448,8 +499,7 @@ class Match:
         else:                                                      # shot
             subtype = "ON TARGET-GOAL" if f["goal"] else "ON TARGET-SAVED" if f["on_target"] else "OFF TARGET-OUT"
             self.log(side, "SHOT", subtype, f["start"], frame, f["shooter"], None, f["from"], f["to"])
-            keepers = np.flatnonzero(self.keeper & self.active & (self.team == 1 - side))
-            keeper = int(keepers[0]) if len(keepers) else self.nearest(1 - side, f["to"])
+            keeper = f["keeper"]
             if f["goal"]:
                 self.score[side] += 1
                 self.possession = 1 - side
@@ -469,14 +519,14 @@ class Match:
         self.last_turnover = frame
         self.reaction_jitter = self.rng.exponential(REACTION_JITTER, len(self.players))
         self.runs.clear()
-        self.next_decision = frame + int((0.4 + self.rng.exponential(1.0)) * FPS)
+        self.next_decision, self.rushed = frame + int(0.2 * FPS) + self.hold_frames(new_holder), False
 
     def dead_ball(self, side: int, spot: np.ndarray, frame: int, kind: str, wait: float,
                   kickoff: bool = False, taker: int | None = None) -> None:
         self.possession = side
-        self.holder, self.flight = None, None
-        self.ball = spot.copy()
+        self.holder, self.flight = None, None             # the ball stays where it went dead for now
         self.restart = {"side": side, "spot": spot, "kind": kind, "ready": frame + int(wait * FPS),
+                        "moves": frame + int(RESTART_PAUSE * FPS),
                         "taker": taker if taker is not None else self.nearest(side, spot, outfield=True),
                         "kickoff": kickoff}
         self.runs.clear()
@@ -512,9 +562,15 @@ class Match:
         if self.holder is not None:                            # carry forward when there's room
             room = np.min(np.linalg.norm(self.pos[self.active & (self.team != side)] - self.pos[self.holder], axis=1))
             carry = self.pos[self.holder] + np.array([s * (6 if room > 4 else 1.5), self.rng.normal(0, 1)])
+            carry = np.clip(carry, [1.0, 1.0], [L - 1.0, W - 1.0])            # never dribble off the pitch
             targets[self.holder], urgency[self.holder] = carry, 0.45 + 0.04 * min(room, 6)
+        if self.holder is not None and np.linalg.norm(self.ball - self.pos[self.holder]) > 1.2:
+            targets[self.holder], urgency[self.holder] = self.ball, 0.9      # meet the ball
         if self.flight and self.flight.get("receiver") is not None and self.flight["kind"] == "pass":
             targets[self.flight["receiver"]], urgency[self.flight["receiver"]] = self.flight["to"], 0.9
+        if self.flight and self.flight["kind"] == "shot":                    # the keeper goes for it
+            targets[self.flight["keeper"]] = np.clip(self.flight["to"], [0.5, 0.5], [L - 0.5, W - 0.5])
+            urgency[self.flight["keeper"]] = 1.0
 
         # Off-ball runs by role, and the markers who follow them.
         attackers = np.flatnonzero(self.active & (self.team == side) & ~self.keeper)
@@ -586,6 +642,13 @@ class Match:
         return np.clip(aim, [2, 2], [L - 2, W - 2])
 
     # ── Heads ────────────────────────────────────────────────────────────────
+    @staticmethod
+    def toward(ball: np.ndarray, point: np.ndarray, speed: float) -> np.ndarray:
+        """The ball moved towards `point` by at most `speed` m/s for one frame."""
+        gap = point - ball
+        step = np.linalg.norm(gap)
+        return point.copy() if step <= speed * DT else ball + gap / step * speed * DT
+
     def recent_checks(self, k: int, frame: int) -> int:
         """Head checks player k started in the last SCAN_MEMORY seconds."""
         onsets, since, count = self.check_onsets[k], frame - SCAN_MEMORY * FPS, 0
@@ -708,28 +771,40 @@ class Match:
                         self.runs.pop(out, None)
                         self.subs.remove(sub)
 
+                landed = False
                 if self.restart is not None:                   # waiting for a restart
                     r = self.restart
-                    if frame >= r["ready"] and np.linalg.norm(self.pos[r["taker"]] - r["spot"]) < 1.5:
+                    if frame >= r["moves"]:                    # the ball is brought back to the spot
+                        self.ball = self.toward(self.ball, r["spot"], RETURN_SPEED)
+                    if frame >= r["ready"] and np.linalg.norm(self.pos[r["taker"]] - r["spot"]) < 1.5 \
+                            and np.allclose(self.ball, r["spot"]):
                         self.restart = None
                         self.holder, self.holder_checks = r["taker"], None
                         self.log(r["side"], "SET PIECE", r["kind"], frame, frame, r["taker"], None, r["spot"], r["spot"])
-                        self.next_decision = frame + int(0.3 * FPS)
+                        self.next_decision, self.rushed = frame + int(0.3 * FPS), True
                 elif self.flight is not None:
-                    f = self.flight
-                    progress = (frame - f["start"]) / max(f["end"] - f["start"], 1)
-                    self.ball = f["from"] + min(progress, 1.0) * (f["to"] - f["from"])
+                    f, landed = self.flight, True                # no control step on top this frame
+                    line, tau = f["to"] - f["from"], (frame - f["start"]) * DT
+                    covered = min(f["v0"] * tau - f["decel"] * tau ** 2 / 2, np.linalg.norm(line))
+                    self.ball = f["to"].copy() if frame >= f["end"] else \
+                        f["from"] + line * covered / max(np.linalg.norm(line), 1e-6)
                     if frame >= f["end"]:
                         self.land_ball(frame)
-                elif self.holder is not None and frame >= self.next_decision:
-                    self.choose_action(frame)
+                elif self.holder is not None:
+                    pressed = np.min(np.linalg.norm(self.pos[self.active & (self.team != self.possession)]
+                                                    - self.pos[self.holder], axis=1)) < PRESSURE_RELEASE
+                    if pressed and not self.rushed:            # closed down: play within a reaction time
+                        self.next_decision = min(self.next_decision, frame + int(self.rng.uniform(0.15, 0.5) * FPS))
+                        self.rushed = True
+                    if frame >= self.next_decision and np.linalg.norm(self.ball - self.pos[self.holder]) < 1.0:
+                        self.choose_action(frame)
 
                 targets, urgency = self.frame_targets(frame)
                 self.steer(frame, targets, urgency)
                 self.pos = np.clip(self.pos, [-1.5, -1.5], [L + 1.5, W + 1.5])
-                if self.holder is not None:
+                if self.holder is not None and not landed:     # at the feet, or rolling there
                     heading = self.vel[self.holder] / max(np.linalg.norm(self.vel[self.holder]), 0.5)
-                    self.ball = self.pos[self.holder] + 0.4 * heading
+                    self.ball = self.toward(self.ball, self.pos[self.holder] + 0.4 * heading, CONTROL_SPEED)
                 self.update_heads(frame)
                 positions[frame, self.active] = self.pos[self.active] + self.rng.normal(0, 0.03, (self.active.sum(), 2))
                 head[frame, self.active] = self.yaw[self.active]

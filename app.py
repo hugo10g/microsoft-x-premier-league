@@ -10,7 +10,7 @@ Off-ball valuation dashboard for a synthetic, football-realistic league.
     Player Profile      one player's four pillars against their position, match by
                         match, with the most similar players in the league.
     Match Report        a fact-checked report written by a team of agents.
-    Off-Ball Index      the composite 0-100 indexes: equal weights over nine metrics
+    Off-Ball Index      the composite 0-100 indexes: equal weights over ten metrics
                         (core.composite), or the five tactical metrics weighted by their
                         impact on shots (core.impact); rankings and attribute polygons.
     Value Finder        every outfielder across the league: market value against
@@ -590,7 +590,7 @@ def leaderboard_columns() -> dict:
         "minutes": st.column_config.NumberColumn("Minutes", format="%.0f"),
         "index": st.column_config.ProgressColumn(
             "Off-Ball Index", min_value=0, max_value=100, format="%.0f",
-            help="The headline score: nine off-ball metrics in five categories, as percentiles within "
+            help="The headline score: ten off-ball metrics in five categories, as percentiles within "
                  "position (50 = the middle). Blank for goalkeepers and players under the minutes floor"),
         "off_ball_value": st.column_config.ProgressColumn(
             "Pillar score", min_value=0, max_value=100, format="%.0f",
@@ -635,6 +635,14 @@ def leaderboard_columns() -> dict:
             help="Ground made up on the carrier per 90, weighted by how close it was made up"),
         "press_closing_kmh": st.column_config.NumberColumn(
             "Closing speed", format="%.1f km/h", help="Average peak speed closing down the carrier"),
+        "press_wins": st.column_config.NumberColumn(
+            "Pressures won", format="%d",
+            help=f"Pressures after which the team won the ball within {PRESSURE.win_window:g} s: a tackle, "
+                 "an interception, or a pass forced out of play"),
+        "press_wins_p90": st.column_config.NumberColumn(
+            "Pressures won /90", format="%.1f", help="Pressures that won the ball back, per 90"),
+        "press_win_pct": st.column_config.NumberColumn(
+            "Press win rate", format="percent", help="Share of this player's pressures that won the ball back"),
         "receipt_space": st.column_config.NumberColumn(
             "Space at receipt", format="%.1f m",
             help="Median distance to the nearest opponent when receiving a pass"),
@@ -723,7 +731,7 @@ if page == "Match Leaderboards":
   defender, *pulling wide* when it heads for the touchline, *dropping deep* when it comes back
   towards the ball. Per 90.
 - **Off-Ball Index**: the headline score, as on the Off-Ball Index page but within this match:
-  nine metrics as percentiles among the match's players in the same position, small samples pulled
+  ten metrics as percentiles among the match's players in the same position, small samples pulled
   towards 50 (one match is a small sample), five equally weighted categories. Goalkeepers have none.
 - **Pillar score**: the mean percentile of the four pillar columns (Decoy Run Value, Pressing
   Lane Cuts, Transition score, Scan rate) among the players shown.
@@ -781,7 +789,7 @@ METRIC_LABELS = {m: label for m, (label, _) in (analysis.PILLARS | analysis.TACT
 if page == "Off-Ball Index":
     by_impact = st.segmented_control(
         "Weighting", ["Off-Ball Index", "Off-Ball Impact"], default="Off-Ball Index", key="index-mode",
-        help="Off-Ball Index: nine metrics in five categories, equal weights. Off-Ball Impact: the five "
+        help="Off-Ball Index: ten metrics in five categories, equal weights. Off-Ball Impact: the five "
              "tactical metrics, each weighted by how much it moves the team's shot balance.") == "Off-Ball Impact"
     controls = st.columns([1, 1, 2])
     position = controls[0].selectbox("Position", ["All", "Defender", "Midfielder", "Forward"], key="index-position")
@@ -802,7 +810,7 @@ if page == "Off-Ball Index":
                       "Whiskers are 95% intervals from resampling whole matches: with six matches, read "
                       "the order, not the exact numbers.")
     else:
-        st.caption("One 0-100 score per player from nine off-ball metrics, each ranked against the same "
+        st.caption("One 0-100 score per player from ten off-ball metrics, each ranked against the same "
                    "position (50 = the middle), grouped into five equally weighted categories.")
         with controls[1].popover("Tune category weights", width="stretch"):
             weights = tuple((name, st.slider(label, 0.0, 3.0, float(INDEX_CONFIG["categories"][name]["weight"]),
@@ -846,7 +854,7 @@ if page == "Off-Ball Index":
     with st.expander("How the index is computed"):
         st.markdown(f"""
 - **Metrics**: Spacing = pitch control and receipts in space; Movement = decoy runs and transition
-  reaction; Creation = OBSO; Scanning = scan rate; Defence = lane cuts, pressure intensity and
+  reaction; Creation = OBSO; Scanning = scan rate; Defence = lane cuts, pressure intensity, pressures won and
   defensive responsibility (flipped, lower is better). Overlapping metrics (latency, sprint rate,
   closing speed...) and run types (style, not quality) are left out.
 - **Normalisation**: each metric is a mid-rank percentile among players of the same position and
@@ -856,7 +864,7 @@ if page == "Off-Ball Index":
 - **Formula**: subscore = weighted mean of its metric scores; index = weighted mean of the
   subscores. A missing metric drops out and the weights renormalise; *Coverage* is the share of the
   weight observed, and below {INDEX_CONFIG['min_coverage']:.0%} there is no index.
-- **Caveats**: lane cuts and pressure intensity overlap (ρ ≈ 0.86), so pressing counts nearly twice
+- **Caveats**: lane cuts and pressure intensity overlap (ρ ≈ 0.79), so pressing counts nearly twice
   within Defence; defensive responsibility also reflects the team's press; Spacing and Creation do not
   track any hidden talent in this league, so read them as role context. Six matches is a small sample:
   one rank moves a percentile by 7-10 points. Full method: `docs/composite_index.md`.
@@ -899,7 +907,7 @@ if page == "Player Profile":
         row = profile["row"]
         tiles = st.columns(6)
         tiles[0].metric("Off-Ball Index", "–" if pd.isna(row["index"]) else f"{row['index']:.0f}",
-                        help="Composite of nine metrics within position (Off-Ball Index page); blank under "
+                        help="Composite of ten metrics within position (Off-Ball Index page); blank under "
                              f"{INDEX_CONFIG['min_minutes']} minutes")
         tiles[1].metric("Pillar score", f"{row['off_ball_value']:.0f}",
                         help="Mean percentile of the four pillars across the league's outfielders")
@@ -963,7 +971,7 @@ if page == "Value Finder":
     pool_minutes = controls[0].slider("Minimum minutes played", 0, 90, 30, key="pool_minutes")
     y_axis = controls[1].selectbox(
         "Market value against", list(Y_AXES), key="finder-axis",
-        help="Off-Ball Index: the composite of nine metrics within position (players with 90+ minutes). "
+        help="Off-Ball Index: the composite of ten metrics within position (players with 90+ minutes). "
              "Pillar score: the four-pillar percentile score. ML predicted value: what a "
              "gradient-boosted model prices the player at from off-ball work. The others are the "
              "tactical metrics; for Defensive Responsibility lower is better.")

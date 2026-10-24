@@ -26,7 +26,7 @@ def league() -> tuple[list, dict, pd.DataFrame]:
     games = pipeline.available_games()
     if not games:
         sys.exit("No games in data/synthetic: run scripts/generate_synthetic_league.py first.")
-    data = pipeline.score_all(pipeline.learn_xt(games), games)
+    data = pipeline.load_scored(pipeline.games_signature(games)) or pipeline.score_all(pipeline.learn_xt(games), games)
     names = pd.concat([pipeline.load_roster(g).assign(uid=lambda t, n=g.name: n + ":" + t["player"])
                        for g in games], ignore_index=True).rename(columns={"club": "real_team"})
     names = names[["uid", "name", "real_team", "position", "detailed_position", "market_value_m"]]

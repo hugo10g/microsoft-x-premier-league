@@ -77,6 +77,12 @@ COLUMNS: dict[str, tuple[str, str]] = {
     "pressure_intensity": ("pressure_intensity_p90", "metres closed down on the ball carrier per 90, "
                                                      "weighted by how close (within 10 m); higher = "
                                                      "presses more aggressively"),
+    "press_wins_p90": ("pressures_won_p90", "pressures per 90 after which the team won the ball within 3 s "
+                                            "(tackle, interception or a pass forced out of play); higher = "
+                                            "presses that win the ball more often"),
+    "press_win_pct": ("press_win_rate", "share of the player's pressures after which their team won the ball "
+                                        "within 3 s (tackle, interception or a pass forced out of play), 0-1; "
+                                        "higher = presses that work"),
     "receipts_in_space_pct": ("receipts_in_space", "share of receptions with the nearest opponent 5+ m "
                                                    "away (0-1); higher = finds space before the ball arrives"),
     "def_responsibility_p90": ("xt_conceded_in_zone_p90", "expected threat of opponent passes into the zone "
@@ -117,7 +123,7 @@ RANKINGS: list[tuple[str, bool, str]] = [
 
 SYSTEM_PROMPT = """You are AI Scout, an analyst for a football club's recruitment team.
 You answer questions about players' OFF-BALL contribution using only the data provided below.
-The headline score is the Off-Ball Index (nine metrics, percentiles within position). The Pillar
+The headline score is the Off-Ball Index (ten metrics, percentiles within position). The Pillar
 score averages the four pillars: decoy runs (space created for teammates), pressing lane cuts,
 transition reaction (sprinting after a turnover) and scanning (head checks before receiving).
 Five tactical metrics add detail: pressure intensity, receipts in space, defensive responsibility,

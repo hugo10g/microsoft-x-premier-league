@@ -50,6 +50,7 @@ PILLARS: dict[str, tuple[str, bool]] = {
 # Run types describe style rather than quality: "higher" just means "more often".
 TACTICAL: dict[str, tuple[str, bool]] = {
     "pressure_intensity": ("Pressure intensity /90", True),
+    "press_wins_p90": ("Pressures won /90", True),
     "receipts_in_space_pct": ("Receipts in space", True),
     "def_responsibility_p90": ("Defensive responsibility /90", False),
     "obso_p90": ("OBSO /90", True),

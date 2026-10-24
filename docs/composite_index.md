@@ -20,6 +20,7 @@ It is built only from metrics the pipeline already produces. It adds no new meas
 | Scanning | `scan_rate`: head scans per second before receiving | higher | receptions |
 | Defence | `lane_cut_p90`: seconds spent cutting passing lanes per 90 | higher | minutes |
 | Defence | `pressure_intensity`: metres closed on the carrier per 90, weighted by proximity | higher | minutes |
+| Defence | `press_wins_p90`: pressures per 90 after which the player's team won the ball within 3 s (tackle, interception, or a pass forced out of play) | higher | minutes |
 | Defence | `def_responsibility_p90`: xT conceded through the player's zone per 90 | **lower** (flipped) | minutes |
 
 **Left out on purpose:**
@@ -74,17 +75,18 @@ To weight every metric equally instead, set each category's weight to its number
 
 | Score | Tracks |
 |---|---|
-| Index | 0.60 with the mean of work rate, pressing and awareness |
-| Movement | 0.79 with work rate |
-| Scanning | 0.86 with awareness |
-| Defence | 0.64 with pressing |
-| Spacing | none (|ρ| ≤ 0.19 with every trait) |
-| Creation | none (|ρ| ≤ 0.25 with every trait) |
+| Index | 0.73 with the mean of work rate, pressing and awareness |
+| Movement | 0.80 with work rate |
+| Scanning | 0.87 with awareness |
+| Defence | 0.72 with pressing |
+| Spacing | none (|ρ| ≤ 0.27 with every trait) |
+| Creation | weak (|ρ| ≤ 0.35 with every trait) |
 
 ## Limitations and flags
 
 - **Multicollinearity.**
-  - `lane_cut_p90` and `pressure_intensity` have ρ = 0.86, so pressing counts almost twice within Defence. Halving their weights is a reasonable fix.
+  - `lane_cut_p90` and `pressure_intensity` have ρ = 0.79, and `pressure_intensity` and `press_wins_p90` 0.77, so pressing volume dominates Defence. Lowering those weights in the config is a reasonable fix.
+  - Press-and-win enters Defence as pressures won per 90 (`press_wins_p90`), not the win *rate* (`press_win_pct`). The rate has no link to the hidden pressing trait here (ρ 0.06; the count 0.62): in the simulator whether a press ends in a turnover depends on the carrier and the passing lane, not the presser. With the rate in Defence, Defence tracked pressing at 0.61 and the index 0.72; with pressures won per 90, 0.72 and 0.73. The count overlaps pressure intensity (ρ 0.75), so pressing volume now carries three of Defence's four metrics. The rate is still shown in the leaderboards.
   - The script prints every pair of scores with |ρ| > 0.7.
 - **Sample size.**
   - There are only 6 matches, and each player has at most about 280 minutes.

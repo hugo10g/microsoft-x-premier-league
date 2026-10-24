@@ -33,6 +33,7 @@ Every threshold lives in `core/config.py`. Each metric is computed from 25 Hz tr
 | Metric | Column | Definition |
 |---|---|---|
 | Pressure Intensity | `pressure_intensity` | Spells of at least 0.4 s within 10 m of a controlled carrier, closing faster than 5 km/h. Metres closed, weighted by proximity, per 90. |
+| Press and win | `press_wins`, `press_wins_p90`, `press_win_pct` | A pressure spell is *won* when, between the spell's start and 3 s after it ends, the presser's team wins the ball by a tackle or an interception (a `RECOVERY` event; keeper saves excluded), or the pressed team passes it out of play (a forced error; a shot off target doesn't count). `won_how` says which and `regained_by` who won it. Each player is credited once per win. Count, per 90 (in the Off-Ball Index), and share of the player's pressures. |
 | Receipts in Space | `receipts_in_space_pct` | Share of receptions with no opponent within 5 m when the pass arrives |
 | Defensive Responsibility | `def_responsibility_p90` | xT gained by opponents' passes ending in the player's zone (their slot in the team's shape), shared by distance, per 90. Lower is better. |
 | OBSO | `obso_p90` | Every 0.2 s in possession: the off-ball attacker's xT × how free they are × how reachable they are from the ball. Per 90. |
@@ -42,6 +43,6 @@ Every threshold lives in `core/config.py`. Each metric is computed from 25 Hz tr
 
 | Score | What it is | Method |
 |---|---|---|
-| **Off-Ball Index** (headline) | Nine metrics in five equally weighted categories, percentiles within position. In match views it is computed within that match. | [composite_index.md](composite_index.md) |
+| **Off-Ball Index** (headline) | Ten metrics in five equally weighted categories, percentiles within position. In match views it is computed within that match. | [composite_index.md](composite_index.md) |
 | Pillar score (`off_ball_value`) | Mean percentile of the four pillars among the players shown; a building block | — |
 | Off-Ball Impact Index | The five tactical metrics, weighted by their association with shot difference | [impact_index.md](impact_index.md) |
