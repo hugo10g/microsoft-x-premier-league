@@ -90,3 +90,14 @@ def test_player_script_parses():
     esprima = pytest.importorskip("esprima")                      # a test dependency (requirements.txt)
     script = re.search(r"<script>(.*)</script>", HTML.read_text(), re.S).group(1)
     esprima.parseScript(script.replace("__DATA__", "{}"))
+
+
+def test_a_followed_player_carries_the_distance_they_cover_and_others_dont():
+    tr = tracking()
+    tr.positions[:, 1, 0] = 40.0 + 2.0 * np.arange(T)                  # Home_2 runs 2 m a frame
+    data = build_window(tr, np.zeros_like(tr.positions), np.array(("Home",) * T, dtype=object),
+                        np.zeros((12, 16)), np.arange(T) / 60, 0, T, ["A", "B", "C"],
+                        {"Home": "Home FC", "Away": "Away FC"}, {"Home": "#e63946", "Away": "#3a86ff"},
+                        focus=tr.player_ids[1])
+    assert data["focus"]["player"] == 1 and data["focus"]["distance"] == [2.0 * k for k in range(T)]
+    assert window()["focus"] is None

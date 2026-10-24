@@ -91,7 +91,7 @@ def xt_surfaces(xt: np.ndarray, tr: TrackingData, row: int) -> dict:
 def build_window(tr: TrackingData, velocities: np.ndarray, possession: np.ndarray, xt: np.ndarray,
                  minutes: np.ndarray, start: int, end: int, names: list[str], team_names: dict,
                  team_colours: dict, highlight: dict | None = None, autoplay: bool = False,
-                 start_offset: int = 0, head_yaw: np.ndarray | None = None) -> dict:
+                 start_offset: int = 0, head_yaw: np.ndarray | None = None, focus: str | None = None) -> dict:
     """Everything the pitch player needs for tracking rows [start, end).
 
     names: display name per player (same order as tr.player_ids). highlight:
@@ -99,6 +99,8 @@ def build_window(tr: TrackingData, velocities: np.ndarray, possession: np.ndarra
     a key moment. start_offset: frame within the window where playback begins.
     head_yaw: the full match's (T, P) head yaw in degrees, or None without head data;
     adds "head" (whole degrees, null when unknown) and "scanning" (head checks per frame).
+    focus: the id of a player the viewer follows: ringed, with the distance they've covered
+    since the window began and their speed when sprinting.
     """
     rows = slice(start, end)
     positions, vel, ball = tr.positions[rows], velocities[rows], tr.ball[rows]
@@ -130,5 +132,9 @@ def build_window(tr: TrackingData, velocities: np.ndarray, possession: np.ndarra
         "pitch": {"length": PITCH_LENGTH, "width": PITCH_WIDTH},
         "softness": PITCH_CONTROL.softness, "reach": PRESSING.reach,
         "highlight": mark,
+        "focus": None if focus not in tr.player_ids else {
+            "player": tr.index(focus),
+            "distance": np.round(np.nancumsum(np.r_[0, np.linalg.norm(np.diff(positions[:, tr.index(focus)], axis=0),
+                                                                       axis=1)]), 1).tolist()},
         **head,
     }

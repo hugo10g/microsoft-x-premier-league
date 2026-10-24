@@ -3,6 +3,7 @@
 **Explainable match intelligence for the 90% of the game that happens without the ball.**
 
 Event data records the pass, the shot and the tackle. It misses the run that dragged a centre-back away, the shoulder check before receiving and the sprint the moment the ball was lost. Off-Ball Value measures that work from 25 Hz tracking data and makes it explainable:
+- it follows a match live, event by event, saying why each moment matters;
 - it plays any moment back on a 2D pitch;
 - it ranks and profiles every player against their own position;
 - it prices players against their off-ball contribution;
@@ -14,23 +15,44 @@ Event data records the pass, the shot and the tackle. It misses the run that dra
 
 | Page | What you get |
 |---|---|
+| **Live Match** | A match replayed as its events arrive. A running score and statistics (possession, shots, pass accuracy, pass difficulty), and commentary that says *why* each moment matters. A control-vs-chaos rhythm chart, and a downloadable **overlay feed**: every event as a timed, machine-readable cue for broadcast graphics. |
 | **Tactical Playback** | Any moment of a match on a 2D pitch in the browser, under a scoreboard. Beside the pitch, highlight clips of the goals and each pillar (Scanning, Space, Pressing, Transition) play in one click; overlays show head-check cones, pitch control, xT and the lanes a press cuts. |
 | **Match Leaderboards** | Every player in the match ranked, with the team battle, intensity by 15-minute block and a timeline of key moments. |
-| **Match Report** | A report written by four agents and checked against the match facts. Every cited moment can be watched in the playback. |
+| **Match Report** | A report written by four agents and checked against the match facts. Every cited moment can be watched in the playback. Written for fans, analysts or broadcasters, in the reader's language and leading with their club or player. |
 | **Off-Ball Index** | Two 0–100 composite scores with rankings and radar polygons. The **Off-Ball Index** gives equal weight to ten metrics in five categories. The **Off-Ball Impact Index** weights the five tactical metrics by how much they move the team's shot balance. |
 | **Player Profile** | One player against their position: index, polygon, pillar percentiles, match-by-match trend, a step-by-step breakdown of their ML price with the model's formula, and the most similar players. |
 | **Value Finder** | Market value against off-ball work: a "Moneyball" quadrant and an out-of-fold ML price. |
 | **AI Scout** | Plain-language questions about the league's off-ball work, answered from the same numbers. |
 | **Model Check** | Whether the metrics recover the hidden talents the simulator gave each player. |
 
+### Made for every fan: "Your view"
+
+The sidebar personalizes every page:
+
+| Setting | What it does |
+|---|---|
+| **Mode** | **Fan** shows the key moments in plain words. **Analyst** shows every event with its numbers: shot speeds, pass accuracy and difficulty, fouls, offsides. |
+| **Favourite club** | Stars that club's moments in the feeds. |
+| **Follow a player** | Rings the player on the pitch, with their distance covered and their speed whenever they sprint (20 km/h or faster). Stars their moments, and opens the Player Profile on them. |
+| **Language** | Commentary and match reports in English, Spanish, French, Portuguese, German, Italian, Arabic, Japanese or Chinese. Names, numbers and times stay exact, and translated reports pass the same fact-check. |
+
+On the pitch, any ball moving faster than 70 km/h shows its speed: shots, and the hardest-hit passes.
+
+**Pass difficulty** (0–100) uses only what is known when the ball is struck:
+- how tight the lane is (60%);
+- how pressed the passer is (20%);
+- how far forward it goes (20%).
+
+On held-out matches, under 3% of passes rated 0–30 fail, against 36% of those rated 60 or more.
+
 ## Microsoft technology
 
-- **Microsoft Foundry** hosts the model (`gpt-4.1-mini`) behind the Match Report agents and the AI Scout.
+- **Microsoft Foundry** hosts the model (`gpt-4.1-mini`) behind the Match Report agents, the AI Scout and the multi-language live commentary.
 - **Microsoft Agent Framework** orchestrates the Match Report as a workflow graph:
   1. the **Analyst** reads the verified match facts through tools and picks the story;
   2. the **Narrator** writes it, citing every moment;
   3. the **Fact-checker** (code, not a model) rejects any time, number or player the facts don't support and sends the draft back;
-  4. the **Persona editor** retells it for fans, analysts or broadcasters;
+  4. the **Persona editor** retells it for fans, analysts or broadcasters, in the reader's language and leading with their club or player;
   5. the fact-checker checks the result again.
 - **Azure Container Apps** runs the dashboard from the `Dockerfile`, scaling to zero when idle. GitHub Actions tests and builds the image, and model credentials are Container Apps secrets.
 
@@ -53,18 +75,19 @@ flowchart LR
         PIPE --> IMP["impact.py<br/>Impact Index (fit on shots)"]
         PIPE --> ML["ml_model.py<br/>ML price · role clusters"]
         PIPE --> FACTS["match_tools.py<br/>numbered verified facts"]
+        TR --> LIVE["live.py<br/>event feed · pass difficulty · overlay cues"]
     end
     subgraph Agents["Microsoft Agent Framework"]
         FACTS --> AN["Analyst"] --> NA["Narrator"] --> FC{"Fact-checker<br/>(code)"}
         FC -- rejected --> NA
         FC -- passed --> PE["Persona editor"] --> FC2{"Fact-checker"}
     end
-    FOUNDRY[("Microsoft Foundry<br/>gpt-4.1-mini")] -.-> AN & NA & PE & SCOUT
+    FOUNDRY[("Microsoft Foundry<br/>gpt-4.1-mini")] -.-> AN & NA & PE & SCOUT & LIVE
     PIPE --> SCOUT["AI Scout"]
     subgraph App["Streamlit app on Azure Container Apps"]
-        UI["8 pages · Plotly charts · canvas pitch player"]
+        UI["9 pages · live feed · Plotly charts · canvas pitch player"]
     end
-    IDX & IMP & ML & FC2 & SCOUT --> UI
+    IDX & IMP & ML & FC2 & SCOUT & LIVE --> UI
 ```
 
 ## The metrics
@@ -148,7 +171,7 @@ To ship an update, push a new tag, then run `az containerapp update -n off-ball-
 ## Project layout
 
 ```
-app.py                  Streamlit dashboard (8 pages)
+app.py                  Streamlit dashboard (9 pages)
 core/                   tracking, pillars/, pipeline, composite and impact indexes, ML, agents
 ui/                     Plotly charts, playback payload, canvas pitch player
 scripts/                league generator, index scripts

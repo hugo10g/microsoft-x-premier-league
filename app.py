@@ -1,6 +1,9 @@
 """
 Off-ball valuation dashboard for a synthetic, football-realistic league.
 
+    Live Match          a match replayed as its events arrive: running score and stats,
+                        commentary that says why each moment matters, control vs chaos,
+                        a downloadable timed overlay feed for broadcast graphics.
     Tactical Playback   a Football-Manager-style 2D pitch that plays the 25 Hz
                         tracking in the browser, with a scoreboard and highlight clips
                         of the goals and the four pillars beside it,
@@ -33,6 +36,10 @@ Layers: core/ computes (tracking, pillars, pipeline, moments, analysis); ui/payl
 turns those DataFrames into plain arrays for one playback window; ui/charts.py builds
 the Plotly figures; ui/pitch_player.html only draws.
 
+"Your view" in the sidebar personalises every page: Fan or Analyst mode, a favourite club,
+a player to follow (ringed on the pitch with speed and distance tags, starred in the feeds)
+and a language for the commentary and match reports.
+
 Pages are chosen in the sidebar and only the open one is computed, so a Key Moment
 or a cited report moment can switch straight to Tactical Playback.
 
@@ -41,15 +48,16 @@ Run:  streamlit run app.py
 
 import copy
 import html
+import json
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core import analysis, composite, impact, ml_model, moments, pipeline, roster, tracking
+from core import analysis, composite, impact, live, ml_model, moments, pipeline, roster, tracking
 from core.agent import ModelConfig, OffBallAgent
-from core.match_agents import PERSONAS, generate_report
+from core.match_agents import LANGUAGES, PERSONAS, generate_report
 from core.match_tools import Fact, MatchFacts, build_match_facts, clock   # one clock everywhere
 from core.config import MOMENTS, PRESSING, PRESSURE, RECEIPTS, SCANNING, SPACE, TRANSITION
 from ui import charts, payload, pitch_player
@@ -278,13 +286,41 @@ def game_moments(signature: tuple, game: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner="Preparing playback...")
 def player_payload(signature: tuple, game: str, start: int, end: int, names: tuple, team_names: tuple,
-                   highlight: tuple | None, autoplay: bool) -> dict:
+                   highlight: tuple | None, autoplay: bool, focus: str | None = None) -> dict:
     """One playback window for the pitch player (ui.payload.build_window)."""
     tr, _, vel, possession = match(game)
     mark = dict(zip(("player", "start", "end", "label"), highlight)) if highlight else None
     return payload.build_window(tr, vel, possession, xt_grid(signature), game_minutes(game), start, end,
                                 list(names), dict(team_names), TEAM_COLOUR, mark, autoplay,
-                                head_yaw=head_yaw(game))
+                                head_yaw=head_yaw(game), focus=focus)
+
+
+def match_cast(game: str) -> tuple[dict, dict]:
+    """(tracking id -> player name, "Home"/"Away" -> club) for one match."""
+    table = pipeline.load_roster(GAMES[game])
+    return dict(zip(table["player"], table["name"])), {
+        side: table.loc[table["player"].str.startswith(side), "club"].iloc[0] for side in ("Home", "Away")}
+
+
+@st.cache_data(show_spinner="Building the live feed...")
+def live_feed(signature: tuple, game: str) -> pd.DataFrame:
+    """core.live.event_feed for one match."""
+    tr, events, _, _ = match(game)
+    return live.event_feed(events, tr, game_minutes(game), game_moments(signature, game),
+                           match_facts(signature, game), *match_cast(game))
+
+
+@st.cache_data(show_spinner=False)
+def live_passes(signature: tuple, game: str) -> pd.DataFrame:
+    tr, events, _, _ = match(game)
+    return live.pass_quality(tr, events)
+
+
+@st.cache_data(show_spinner="Translating the commentary...")
+def translated_feed(signature: tuple, game: str, language: str) -> list[str] | None:
+    """The live feed's lines and reasons in `language` (None if no model or the call fails)."""
+    feed = live_feed(signature, game)
+    return live.translate(feed["text"].tolist() + feed["why"].tolist(), language, ModelConfig.from_env())
 
 
 # ── Charts ───────────────────────────────────────────────────────────────────
@@ -384,11 +420,11 @@ xt = xt_grid(signature)
 global_data = load_global_metrics(signature)
 names = league_names(signature)
 # Page -> what it covers. Match pages follow the sidebar's match; the rest pool the league.
-PAGES = {"Tactical Playback": "This match · the 2D pitch", "Match Leaderboards": "This match · rankings",
+PAGES = {"Live Match": "This match · as it happens", "Tactical Playback": "This match · the 2D pitch", "Match Leaderboards": "This match · rankings",
          "Match Report": "This match · fact-checked AI report", "Off-Ball Index": "League · composite index",
          "Player Profile": "League · one player in depth", "Value Finder": "League · price v off-ball work",
          "AI Scout": "League · ask the data", "Model Check": "League · do the metrics find talent?"}
-MATCH_PAGES = ["Tactical Playback", "Match Leaderboards", "Match Report"]
+MATCH_PAGES = ["Live Match", "Tactical Playback", "Match Leaderboards", "Match Report"]
 with st.sidebar:
     page = st.radio("View", list(PAGES), key="page", captions=list(PAGES.values()))
     st.divider()
@@ -396,7 +432,21 @@ with st.sidebar:
     game = st.selectbox("Playback and leaderboards", list(GAMES), format_func=match_label)
     st.caption(f"The Value Finder always pools all {len(GAMES)} matches. Every club, player and "
                "value is fictional: synthetic, football-realistic data from `core/synthetic.py`.")
+    st.divider()
+    st.header("Your view")
+    view_mode = st.radio("Mode", ["Fan", "Analyst"], horizontal=True, key="view_mode",
+                         help="Fan: the key moments in plain words. Analyst: every event, with the numbers.")
+    fav_club = st.selectbox("Favourite club", ["None", *sorted(names["real_team"].unique())], key="fav_club")
+    fav_player = st.selectbox("Follow a player", ["None", *sorted(names["name"].unique())], key="fav_player",
+                              help="Ringed on the pitch with speed and distance tags, starred in the feeds")
+    language = st.selectbox("Language", LANGUAGES, key="language",
+                            help="For the live commentary and match reports (needs the AI model)")
+fav_club = None if fav_club == "None" else fav_club
+fav_player = None if fav_player == "None" else fav_player
 game_profiles = global_data["profiles"][global_data["profiles"]["game"] == game]
+cast, side_club = match_cast(game)
+followed = next((pid for pid, who in cast.items() if who == fav_player), None)   # tracking id in this match
+favourite = lambda team, name: name == fav_player or side_club.get(team) == fav_club
 timeline = roster.static_timeline(game_profiles, names, key="uid")
 clubs = pipeline.load_roster(GAMES[game]).drop_duplicates("player").set_index("player")["club"]
 
@@ -454,18 +504,19 @@ CLIP_GROUPS = {"Goals": ("goal",), "Scanning": ("scan",), "Space": ("decoy",), "
                "Transition": ("attacking_transition", "defensive_transition")}
 
 
-def scoreboard(facts: MatchFacts, upto: float | None = None, at: str | None = None) -> None:
+def scoreboard(facts: MatchFacts, upto: float | None = None, at: str | None = None, spoilers: bool = True) -> None:
     """Both clubs, the score and the scorers. With `upto` (tracking seconds) the score at that
-    moment, full time beside it, and goals still to come greyed out."""
+    moment, full time beside it, and goals still to come greyed out; spoilers=False hides the
+    full-time score and goals still to come (the live view)."""
     side = lambda goal: (goal.player or "").split("_")[0]
     goals = facts.of_kind("goal")
     scored = lambda goal: upto is None or (goal.time is not None and goal.time <= upto)
     count = {s: sum(side(g) == s and scored(g) for g in goals) for s in ("Home", "Away")}
     scorers = {s: " · ".join(f'<span style="opacity:{1 if scored(g) else 0.4}">{html.escape(g.name or g.player)} '
-                             f'{g.clock}</span>' for g in goals if side(g) == s) or "&nbsp;"
-               for s in ("Home", "Away")}
-    status = (f"Score at {at} · full time {facts.score[0]}–{facts.score[1]}" if upto is not None
-              else "Full time")
+                             f'{g.clock}</span>' for g in goals if side(g) == s and (spoilers or scored(g)))
+                  or "&nbsp;" for s in ("Home", "Away")}
+    status = ("Full time" if upto is None else f"Score at {at}" if not spoilers
+              else f"Score at {at} · full time {facts.score[0]}–{facts.score[1]}")
     club = lambda s, name: (f'<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
                             f'background:{TEAM_COLOUR[s]};margin:0 8px"></span><b>{html.escape(name)}</b>')
     st.markdown(f"""
@@ -498,7 +549,8 @@ def highlights(facts: MatchFacts) -> None:
         else:
             for n, row in clips[group].iterrows():
                 phase = {"attacking_transition": " · attacking", "defensive_transition": " · defensive"}
-                st.button(f"{clock(row.minute)} · {name_of(row.player, row.minute)}{phase.get(row.kind, '')}",
+                star = "★ " if favourite(row.player.split("_")[0], name_of(row.player, row.minute)) else ""
+                st.button(f"{star}{clock(row.minute)} · {name_of(row.player, row.minute)}{phase.get(row.kind, '')}",
                           key=f"moment-{game}-{n}", help=f"{moments.KINDS[row.kind]}: {row.detail}",
                           width="stretch", on_click=jump_to_moment, args=(row.to_dict(),),
                           type="primary" if playing(row.kind, row.time) else "secondary")
@@ -510,10 +562,73 @@ def highlights(facts: MatchFacts) -> None:
 st.header(page)
 if page in MATCH_PAGES:
     st.caption(f"{match_label(game)} · change the match in the sidebar")
-    if page != "Tactical Playback":          # playback shows the score at the moment being watched
+    if page not in ("Tactical Playback", "Live Match"):   # those show the score at the moment being watched
         scoreboard(match_facts(signature, game))
 else:
     st.caption(f"All {len(GAMES)} matches of the synthetic league")
+
+LIVE_SPEEDS = {"1 min per second": 1.0, "3 min per second": 3.0, "10 min per second": 10.0}
+FEED_ICONS = {"goal": "⚽", "card": "🟨", "penalty": "❗", "shot": "🎯", "corner": "⛳", "offside": "🚩",
+              "decoy": "🏃", "press": "🧲", "defensive_transition": "⚡", "attacking_transition": "⚡", "scan": "👀"}
+
+if page == "Live Match":
+    feed, state = live_feed(signature, game), st.session_state
+    end_minute = float(minutes[-1])
+    if state.get("live_game") != game:                     # a new match starts from kick-off, paused
+        state["live_game"], state["live_minute"], state["live_playing"] = game, 0.0, False
+    analyst = view_mode == "Analyst"
+    texts = translated_feed(signature, game, language) if language != "English" else None
+    controls = st.columns([1, 1, 3])
+    controls[0].button("⏸ Pause" if state["live_playing"] else "▶ Play live", type="primary", width="stretch",
+                       key="live-play", on_click=lambda: state.update(live_playing=not state["live_playing"]))
+    controls[1].selectbox("Speed", list(LIVE_SPEEDS), index=1, key="live-speed", label_visibility="collapsed")
+    controls[2].caption("The match arrives event by event: every number below uses only what has happened so far. "
+                        + ("Analyst mode: every event with its numbers." if analyst else "Fan mode: the key moments.")
+                        + ("" if language == "English" or texts else " Translation needs the AI model: in English."))
+
+    @st.fragment(run_every=1.0 if state["live_playing"] else None)
+    def live_panel() -> None:
+        if state["live_playing"]:                          # the clock moves on, then everything redraws
+            state["live_minute"] = min(end_minute, state["live_minute"] + LIVE_SPEEDS[state["live-speed"]])
+            if state["live_minute"] >= end_minute:
+                state["live_playing"] = False
+        minute = st.slider("Match minute", 0.0, end_minute, key="live_minute", step=0.5, format="%.1f")
+        seconds = float(np.interp(minute, minutes, tr.timestamps))
+        scoreboard(match_facts(signature, game), seconds, clock(minute), spoilers=False)
+        left, right = st.columns([3, 2], gap="medium")
+        so_far = feed[feed["minute"] <= minute]
+        so_far = so_far if analyst else so_far[so_far["tier"] == "key"]
+        with left:
+            st.markdown("**Live commentary**")
+            with st.container(height=560):
+                for k, row in so_far.iloc[::-1].head(25).iterrows():
+                    text = texts[k] if texts else row.text
+                    why = texts[len(feed) + k] if texts else row.why
+                    star = "★ " if favourite(row["team"], row["name"]) else ""     # row.name is the index
+                    st.markdown(f"`{row.clock}` {FEED_ICONS.get(row.kind, '•')} {star}{text}")
+                    if why:
+                        st.caption(why)
+                if so_far.empty:
+                    st.caption("Kick-off: the commentary appears as the events arrive.")
+        with right:
+            stats = live.state_at(events, tr, minutes, possession, minute, live_passes(signature, game))
+            rows = {"Possession %": "possession", "Shots": "shots", "On target": "on_target",
+                    "Yellow cards": "yellow_cards", "Corners": "corners"}
+            if analyst:
+                rows |= {"Passes": "passes", "Pass accuracy %": "pass_accuracy",
+                         "Completed-pass difficulty (0-100)": "pass_difficulty", "Fouls": "fouls", "Offsides": "offsides"}
+            table = pd.DataFrame({side_club[side]: [stats[side][v] for v in rows.values()] for side in ("Home", "Away")},
+                                 index=list(rows))
+            st.dataframe(table, width="stretch")
+            st.plotly_chart(charts.live_rhythm(live.rhythm(tr, minutes, possession, minute), side_club["Home"],
+                                               side_club["Away"]), key="live-rhythm")
+            st.caption("Control vs chaos: who had the ball in each 3-minute spell, and how often it changed hands.")
+
+    live_panel()
+    st.download_button("⬇ Overlay feed (JSON)", json.dumps(live.overlay_items(feed, game), ensure_ascii=False, indent=1),
+                       file_name=f"{game}_overlay_feed.json", mime="application/json",
+                       help="Every event as a timed graphics cue (time, clock, type, player, text, why, how long "
+                            "to show it): machine-readable for a broadcast overlay system.")
 
 if page == "Tactical Playback":
     # The window: a short lead-in before the target, WINDOW_SECONDS long, inside one period.
@@ -549,7 +664,8 @@ if page == "Tactical Playback":
     current = roster.active(timeline, window_minute)
     with left_area:
         pitch_player.render(player_payload(signature, game, start, end, tuple(names_at(window_minute)),
-                                           tuple(team_names.items()), highlight, target["autoplay"]), height=780)
+                                           tuple(team_names.items()), highlight, target["autoplay"], followed),
+                            height=780)
     left_area.caption("Space plays and pauses; arrow keys step a frame (Shift: a second). Cones point the "
                "way each player is moving (towards the ball when nearly still). With Head direction on, "
                f"a yellow cone shows a head check: a player looking more than {SCANNING.on_angle:g}° away "
@@ -898,8 +1014,9 @@ if page == "Player Profile":
     else:
         ranked = pool.sort_values(["index", "off_ball_value"], ascending=False, na_position="last")
         picker = st.columns([2, 1])
+        options = ranked["name"].tolist()
         chosen = picker[0].selectbox(
-            "Player", ranked["name"].tolist(), key="profile-player",
+            "Player", options, key="profile-player", index=options.index(fav_player) if fav_player in options else 0,
             format_func=lambda n: f"{n} · {ranked.loc[ranked['name'] == n, 'real_team'].iloc[0]}")
         pillar = picker[1].selectbox("Metric", list(PILLAR_LABELS), format_func=PILLAR_LABELS.get,
                                      key="profile-pillar", help="The four pillars, then the five tactical metrics")
@@ -1118,13 +1235,18 @@ if page == "Match Report":
                "the **Persona editor** retells it for your audience, then gets checked again.")
     facts = match_facts(signature, game)
     choose, generate = st.columns([3, 1])
-    persona = choose.radio("Audience", list(PERSONAS), horizontal=True, key="report-persona")
+    persona = choose.radio("Audience", list(PERSONAS), horizontal=True, key="report-persona",
+                           index=list(PERSONAS).index("Analyst" if view_mode == "Analyst" else "Fan"))
+    focus = fav_player or fav_club or ""
+    choose.caption(f"In {language}" + (f", following {focus}" if focus else "") + " (set in Your view)."
+                   + ("" if language == "English" or config else " Other languages need the AI model; "
+                      "offline reports are in English."))
     reports: dict = st.session_state.setdefault("match_reports", {})
-    key = (game, persona)
+    key = (game, persona, language, focus)
     if generate.button("Generate report" if key not in reports else "Regenerate", type="primary",
                  key="report-generate", width="stretch"):
         with st.status("The agents are writing the report...", expanded=False) as status:
-            report = generate_report(facts, persona)
+            report = generate_report(facts, persona, language=language, focus=focus)
             status.update(label=f"Report ready in {report.trace[-1].seconds:.0f} s", state="complete")
         reports[key] = report
 

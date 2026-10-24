@@ -396,11 +396,13 @@ def build_match_facts(game: str, events: pd.DataFrame, roster: pd.DataFrame,
 
     for side, club in club_of_side.items():
         mine = events[events["Team"] == side]
-        passes = int((mine["Type"] == "PASS").sum())
+        intercepted = (mine["Type"] == "BALL LOST") & (mine["Subtype"] == "INTERCEPTION")   # failed passes too
+        passes = int(((mine["Type"] == "PASS") | intercepted).sum())
         completed = int(((mine["Type"] == "PASS") & mine["To"].notna()).sum())
         side_shots = shots[shots["Team"] == side]
         on_target = int(side_shots["Subtype"].astype(str).str.startswith("ON TARGET").sum())
-        all_passes = int((events["Type"] == "PASS").sum())
+        all_passes = int(((events["Type"] == "PASS") | ((events["Type"] == "BALL LOST")
+                          & (events["Subtype"] == "INTERCEPTION"))).sum())
         share = round(100 * passes / all_passes) if all_passes else 0
         rival = events[events["Team"] != side]
         fouls = int((rival["Type"] == "FAULT RECEIVED").sum())          # fouls this side committed

@@ -133,3 +133,14 @@ def test_clock_absorbs_float_error_and_truncates_seconds():
     assert clock(27 + 55 / 60) == "27:55"
     assert clock(27.9086) == "27:54"            # 27:54.5 -> whole seconds, like the dashboard
     assert clock(93 + 14 / 60) == "93:14"
+
+
+def test_language_and_followed_player_reach_the_persona_editor_and_the_rewrite_is_still_checked():
+    spanish = ("Harbourside FC ganó 1-0 a Northvale Athletic. Hugo Tanaka marcó [27:55]. "
+               "Hugo Oyelaran cortó el 79% de las líneas durante 3.5 s [63:30].")
+    persona = Scripted(spanish.replace("79%", "97%"), spanish)          # first try changes a number
+    report = run(agents={"analyst": Scripted("Angle: a narrow win\nFacts: F3, F4"), "narrator": Scripted(GOOD),
+                         "persona": persona}, language="Español", focus="Hugo Tanaka")
+    assert "write it in Español" in persona.prompts[0] and "the reader follows Hugo Tanaka" in persona.prompts[0]
+    assert "Fact-checker: Rejected the persona draft" in actions(report)          # 97% isn't in the facts
+    assert report.verified and report.text == spanish

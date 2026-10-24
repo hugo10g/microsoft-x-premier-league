@@ -104,13 +104,21 @@ Change tone, order and length freely, but:
   sprinted, who made head checks, who won the ball back), each next to that player's full name;
   never add one;
 - never invent names of anyone or anything not in the recap: no pundit, presenter, stadium or
-  manager names (say "the pundit", "the ground")."""
+  manager names (say "the pundit", "the ground");
+- when asked to write in another language, translate everything except player and club names,
+  [mm:ss] citations and numbers, which stay exactly as written (use a decimal point, not a comma);
+- when told whom the reader follows, lead with that club or player wherever the recap mentions
+  them, without adding anything the recap doesn't say."""
+
+LANGUAGES = ["English", "Español", "Français", "Português", "Deutsch", "Italiano", "العربية", "日本語", "中文"]
 
 
 # ── Messages passed between the steps ────────────────────────────────────────
 @dataclass
 class ReportRequest:
     persona: str
+    language: str = "English"
+    focus: str = ""                  # the club or player the reader follows
 
 
 @dataclass
@@ -203,9 +211,20 @@ class AnalystStep(Executor):
         super().__init__(id="analyst")
         self.match, self.agent, self.trace = match, agent, trace
 
+    @staticmethod
+    def audience(request: ReportRequest) -> str:
+        """The persona editor's brief: who reads it, in which language, following whom."""
+        parts = [PERSONAS[request.persona]]
+        if request.language != "English":
+            parts.append(f"write it in {request.language}")
+        if request.focus:
+            parts.append(f"the reader follows {request.focus}")
+        return "; ".join(parts)
+
     @handler
     async def start(self, request: ReportRequest, ctx: WorkflowContext[Brief]) -> None:
         ctx.set_state("persona", request.persona)
+        ctx.set_state("audience", self.audience(request))
         started = time.time()
         brief = None
         if self.agent is not None:
@@ -326,15 +345,13 @@ class PersonaStep(Executor):
 
     @handler
     async def from_verified(self, verified: Verified, ctx: WorkflowContext[Draft]) -> None:
-        persona = ctx.get_state("persona")
-        prompt = f"Audience: {PERSONAS[persona]}\n\nVerified recap:\n{verified.draft.text}"
+        prompt = f"Audience: {ctx.get_state('audience')}\n\nVerified recap:\n{verified.draft.text}"
         await self.write(prompt, verified.draft, 1, ctx)
 
     @handler
     async def revise(self, feedback: Feedback, ctx: WorkflowContext[Draft]) -> None:
-        persona = ctx.get_state("persona")
         source = ctx.get_state("verified_recap")
-        prompt = (f"Audience: {PERSONAS[persona]}\n\nVerified recap:\n{source.text}\n\nYour previous rewrite:\n"
+        prompt = (f"Audience: {ctx.get_state('audience')}\n\nVerified recap:\n{source.text}\n\nYour previous rewrite:\n"
                   f"{feedback.draft.text}\n\nThe fact-checker found these problems. Fix all of them:\n- "
                   + "\n- ".join(feedback.problems))
         await self.write(prompt, source, feedback.draft.attempt + 1, ctx)
@@ -423,10 +440,14 @@ def build_workflow(match: MatchFacts, config: ModelConfig | None, trace: Trace,
 
 
 async def generate_report_async(match: MatchFacts, persona: str = "Fan", config: ModelConfig | None = None,
-                                offline: bool = False, agents: dict[str, Any] | None = None) -> MatchReport:
+                                offline: bool = False, agents: dict[str, Any] | None = None,
+                                language: str = "English", focus: str = "") -> MatchReport:
     """Run the agent team on one match.
 
     config defaults to the environment / .env; offline=True skips the model entirely.
+    language and focus (a club or player the reader follows) shape the persona editor's
+    rewrite; the fact-checker still verifies citations, numbers and names. Offline, the
+    report stays in English.
     """
     if persona not in PERSONAS:
         raise ValueError(f"persona must be one of {list(PERSONAS)}")
@@ -441,7 +462,8 @@ async def generate_report_async(match: MatchFacts, persona: str = "Fan", config:
         from openai import AsyncOpenAI
         http_client = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
     try:
-        result = await build_workflow(match, config, trace, agents, http_client).run(ReportRequest(persona))
+        result = await build_workflow(match, config, trace, agents, http_client).run(
+            ReportRequest(persona, language, focus))
     finally:
         if http_client is not None:          # close inside this event loop, not after it has ended
             await http_client.close()
@@ -466,6 +488,6 @@ async def generate_report_async(match: MatchFacts, persona: str = "Fan", config:
 
 
 def generate_report(match: MatchFacts, persona: str = "Fan", config: ModelConfig | None = None,
-                    offline: bool = False) -> MatchReport:
+                    offline: bool = False, language: str = "English", focus: str = "") -> MatchReport:
     """Synchronous wrapper for scripts and Streamlit."""
-    return asyncio.run(generate_report_async(match, persona, config, offline))
+    return asyncio.run(generate_report_async(match, persona, config, offline, language=language, focus=focus))

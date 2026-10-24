@@ -782,3 +782,32 @@ def price_waterfall(steps: list[tuple[str, float]], title: str = "How the ML pri
     fig.update_yaxes(title="€ millions (synthetic)", rangemode="tozero")
     fig.update_layout(showlegend=False)
     return style(fig, title, height=380)
+
+
+def live_rhythm(spells: pd.DataFrame, home: str, away: str) -> go.Figure:
+    """Control vs chaos per spell (core.live.rhythm): who had the ball, and how often it changed hands.
+
+    Top: Home's share of the ball minus 50, so bars above the line are Home's spells and
+    below are Away's. Bottom: changes of possession; tall bars are scrappy, end-to-end spells.
+    """
+    title = "Game rhythm"
+    if is_empty(spells, "home_share"):
+        return empty_figure(title)
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.62, 0.38], vertical_spacing=0.08)
+    lean = spells["home_share"] - 50
+    colours = np.where(lean >= 0, TEAM_COLOUR["Home"], TEAM_COLOUR["Away"])
+    fig.add_trace(go.Bar(x=spells["spell"], y=lean, marker=dict(color=colours, cornerradius=3), showlegend=False,
+                         customdata=np.column_stack([spells["home_share"], 100 - spells["home_share"]]),
+                         hovertemplate=f"From %{{x:.0f}}'<br>{home} %{{customdata[0]:.0f}}% · {away} "
+                                       f"%{{customdata[1]:.0f}}%<extra></extra>"), row=1, col=1)
+    fig.add_trace(go.Bar(x=spells["spell"], y=spells["changes"], marker=dict(color=GUIDE, cornerradius=3),
+                         showlegend=False, hovertemplate="From %{x:.0f}'<br>%{y} changes of possession<extra></extra>"),
+                  row=2, col=1)
+    fig.update_yaxes(title_text="Ball share − 50%", range=[-50, 50], zeroline=True, zerolinecolor=GUIDE,
+                     row=1, col=1)
+    for y, label in ((45, f"▲ {home}"), (-45, f"▼ {away}")):            # say which side is which
+        fig.add_annotation(x=0, xref="paper", y=y, yref="y", text=label, showarrow=False, xanchor="left",
+                           font_size=11, bgcolor="rgba(128,128,128,0.12)")
+    fig.update_yaxes(title_text="Turnovers", row=2, col=1)
+    fig.update_xaxes(title_text="Match minute", row=2, col=1)
+    return style(fig, title, height=360)
