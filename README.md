@@ -14,7 +14,7 @@ Event data records the pass, the shot and the tackle. It misses the run that dra
 
 | Page | What you get |
 |---|---|
-| **Tactical Playback** | Any moment of a match on a 2D pitch in the browser. Key moments are one click away; overlays show head-check cones, pitch control, xT and the lanes a press cuts. |
+| **Tactical Playback** | Any moment of a match on a 2D pitch in the browser, under a scoreboard. Beside the pitch, highlight clips of the goals and each pillar (Scanning, Space, Pressing, Transition) play in one click; overlays show head-check cones, pitch control, xT and the lanes a press cuts. |
 | **Match Leaderboards** | Every player in the match ranked, with the team battle, intensity by 15-minute block and a timeline of key moments. |
 | **Match Report** | A report written by four agents and checked against the match facts. Every cited moment can be watched in the playback. |
 | **Off-Ball Index** | Two 0–100 composite scores with rankings and radar polygons. The **Off-Ball Index** gives equal weight to nine metrics in five categories. The **Off-Ball Impact Index** weights the five tactical metrics by how much they move the team's shot balance. |

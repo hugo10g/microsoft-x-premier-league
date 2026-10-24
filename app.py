@@ -2,7 +2,8 @@
 Off-ball valuation dashboard for a synthetic, football-realistic league.
 
     Tactical Playback   a Football-Manager-style 2D pitch that plays the 25 Hz
-                        tracking in the browser, with Key Moments to jump to,
+                        tracking in the browser, with a scoreboard and highlight clips
+                        of the goals and the four pillars beside it,
                         head-check cones, and pitch-control / xT overlays on paused frames.
     Match Leaderboards  every player in the selected match ranked by the Off-Ball Index,
                         with the team battle, intensity by period and a moments timeline.
@@ -39,6 +40,7 @@ Run:  streamlit run app.py
 """
 
 import copy
+import html
 
 import numpy as np
 import pandas as pd
@@ -440,21 +442,6 @@ def jump_to_minute() -> None:
 
 
 key_moments = game_moments(signature, game)
-if page in MATCH_PAGES:
-    with st.sidebar:
-        st.header("Key Moments")
-        kinds = st.multiselect("Show", list(moments.KINDS), default=list(moments.KINDS),
-                               format_func=moments.KINDS.get)
-        st.caption("From all four pillars: Scanning, Space, Pressing and Transition.")
-        shown = key_moments[key_moments["kind"].isin(kinds)]
-        with st.container(height=360):
-            for n, row in shown.iterrows():
-                st.button(f"{clock(row.minute)} · {moments.KINDS[row.kind]} · {name_of(row.player, row.minute)}",
-                          key=f"moment-{game}-{n}", help=row.detail, width="stretch",
-                          on_click=jump_to_moment, args=(row.to_dict(),))
-            if shown.empty:
-                st.caption("No moments of the selected kinds in this game.")
-
 target = st.session_state.get("target")
 if not target or target["game"] != game:          # default: the game's first key moment, paused
     first = key_moments.iloc[0].to_dict() if len(key_moments) else None
@@ -462,9 +449,71 @@ if not target or target["game"] != game:          # default: the game's first ke
                "kind": first["kind"], "minute": first["minute"], "detail": first["detail"],
                "autoplay": False} if first else {"game": game, "time": float(tr.timestamps[0]), "autoplay": False})
 
+# Highlight clips beside the pitch: the goals, then each pillar's key moments.
+CLIP_GROUPS = {"Goals": ("goal",), "Scanning": ("scan",), "Space": ("decoy",), "Pressing": ("press",),
+               "Transition": ("attacking_transition", "defensive_transition")}
+
+
+def scoreboard(facts: MatchFacts, upto: float | None = None, at: str | None = None) -> None:
+    """Both clubs, the score and the scorers. With `upto` (tracking seconds) the score at that
+    moment, full time beside it, and goals still to come greyed out."""
+    side = lambda goal: (goal.player or "").split("_")[0]
+    goals = facts.of_kind("goal")
+    scored = lambda goal: upto is None or (goal.time is not None and goal.time <= upto)
+    count = {s: sum(side(g) == s and scored(g) for g in goals) for s in ("Home", "Away")}
+    scorers = {s: " · ".join(f'<span style="opacity:{1 if scored(g) else 0.4}">{html.escape(g.name or g.player)} '
+                             f'{g.clock}</span>' for g in goals if side(g) == s) or "&nbsp;"
+               for s in ("Home", "Away")}
+    status = (f"Score at {at} · full time {facts.score[0]}–{facts.score[1]}" if upto is not None
+              else "Full time")
+    club = lambda s, name: (f'<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'
+                            f'background:{TEAM_COLOUR[s]};margin:0 8px"></span><b>{html.escape(name)}</b>')
+    st.markdown(f"""
+<div style="border:1px solid rgba(128,128,128,.3);border-radius:12px;padding:10px 16px;margin-bottom:12px">
+  <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;font-size:1.15rem">
+    <div style="text-align:right">{html.escape(facts.home)}{club("Home", "")}</div>
+    <div style="font:700 2rem/1 ui-monospace,Menlo,monospace;letter-spacing:.05em">{count["Home"]} – {count["Away"]}</div>
+    <div>{club("Away", "")}{html.escape(facts.away)}</div>
+    <div style="text-align:right;font-size:.85rem;opacity:.8">{scorers["Home"]}</div>
+    <div style="text-align:center;font-size:.75rem;opacity:.7">{status}</div>
+    <div style="font-size:.85rem;opacity:.8">{scorers["Away"]}</div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
+def highlights(facts: MatchFacts) -> None:
+    """The clip list beside the pitch: pick goals or a pillar, click a clip to play it."""
+    clips = {group: (facts.of_kind("goal") if kinds == ("goal",) else
+                     key_moments[key_moments["kind"].isin(kinds)].sort_values("minute"))
+             for group, kinds in CLIP_GROUPS.items()}
+    group = st.radio("Highlights", list(clips), key=f"clip-group-{game}", horizontal=True,
+                     index=0 if len(clips["Goals"]) else 2, format_func=lambda g: f"{g} ({len(clips[g])})")
+    playing = lambda kind, time: target.get("kind") == kind and target.get("time") == time
+    with st.container(height=640):
+        if group == "Goals":
+            for fact in clips["Goals"]:
+                st.button(f"⚽ {fact.clock} · {fact.name or fact.player}", key=f"goal-{game}-{fact.id}",
+                          help=fact.text, width="stretch", on_click=jump_to_fact, args=(fact,),
+                          type="primary" if playing("goal", fact.time) else "secondary")
+        else:
+            for n, row in clips[group].iterrows():
+                phase = {"attacking_transition": " · attacking", "defensive_transition": " · defensive"}
+                st.button(f"{clock(row.minute)} · {name_of(row.player, row.minute)}{phase.get(row.kind, '')}",
+                          key=f"moment-{game}-{n}", help=f"{moments.KINDS[row.kind]}: {row.detail}",
+                          width="stretch", on_click=jump_to_moment, args=(row.to_dict(),),
+                          type="primary" if playing(row.kind, row.time) else "secondary")
+        if not len(clips[group]):
+            st.caption(f"No {group.lower()} clips in this match.")
+    st.caption("Clips are the match's standout moments for each pillar; the playing one is highlighted.")
+
+
 st.header(page)
-st.caption(f"{match_label(game)} · change the match in the sidebar" if page in MATCH_PAGES
-           else f"All {len(GAMES)} matches of the synthetic league")
+if page in MATCH_PAGES:
+    st.caption(f"{match_label(game)} · change the match in the sidebar")
+    if page != "Tactical Playback":          # playback shows the score at the moment being watched
+        scoreboard(match_facts(signature, game))
+else:
+    st.caption(f"All {len(GAMES)} matches of the synthetic league")
 
 if page == "Tactical Playback":
     # The window: a short lead-in before the target, WINDOW_SECONDS long, inside one period.
@@ -475,7 +524,13 @@ if page == "Tactical Playback":
     end = int(min(period_rows[-1] + 1, start + WINDOW_SECONDS * fps))
     window_minute = float(minutes[start])
 
-    heading, goto = st.columns([3, 1])
+    facts = match_facts(signature, game)
+    scoreboard(facts, float(tr.timestamps[start]), clock(window_minute))
+    left, side = st.columns([3, 1], gap="medium")
+    with side:
+        highlights(facts)
+    left_area = left.container()
+    heading, goto = left_area.columns([3, 1])
     if "kind" in target:
         who = name_of(target["player"], target["minute"])
         heading.markdown(f"**{moment_label(target['kind'])}** · {who} · {clock(target['minute'])}  \n"
@@ -492,9 +547,10 @@ if page == "Tactical Playback":
                      f"{moment_label(target['kind'])} · {name_of(target['player'], target['minute'])}")
     team_names = {side: clubs[clubs.index.str.startswith(side)].iloc[0] for side in ("Home", "Away")}
     current = roster.active(timeline, window_minute)
-    pitch_player.render(player_payload(signature, game, start, end, tuple(names_at(window_minute)),
-                                       tuple(team_names.items()), highlight, target["autoplay"]))
-    st.caption("Space plays and pauses; arrow keys step a frame (Shift: a second). Cones point the "
+    with left_area:
+        pitch_player.render(player_payload(signature, game, start, end, tuple(names_at(window_minute)),
+                                           tuple(team_names.items()), highlight, target["autoplay"]), height=780)
+    left_area.caption("Space plays and pauses; arrow keys step a frame (Shift: a second). Cones point the "
                "way each player is moving (towards the ball when nearly still). With Head direction on, "
                f"a yellow cone shows a head check: a player looking more than {SCANNING.on_angle:g}° away "
                "from the ball, from the synthetic head-orientation feed. Shadows and pink lanes show "
@@ -684,7 +740,7 @@ if page == "Match Leaderboards":
                           for f in facts.of_kind("goal") if f.player], columns=["minute", "team", "name"])
     st.plotly_chart(charts.match_timeline(shown_moments, goals, facts.home, facts.away), key="timeline")
     st.caption("Every key moment from the four pillars, by team, with the goals. Hover a marker for the "
-               "detail; the sidebar's Key Moments load any of them into Tactical Playback.")
+               "detail; the Highlights beside the pitch in Tactical Playback play any of them.")
 
     battle, intensity = st.columns(2)
     with battle:
