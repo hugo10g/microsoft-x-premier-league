@@ -91,3 +91,43 @@ def test_the_ball_never_teleports_and_longer_passes_are_struck_harder():
     length = np.hypot((passes["End X"] - passes["Start X"]) * 105, (passes["End Y"] - passes["Start Y"]) * 68)
     assert flight[length > 30].median() > flight[length < 10].median()   # long balls take longer...
     assert (length / flight)[length > 30].median() > (length / flight)[length < 10].median()   # ...but are struck harder
+
+
+def kicked_off_match():
+    rng = np.random.default_rng(4)
+    used: set = set()
+    home, away = make_squad("Test A", "4-3-3", rng, used), make_squad("Test B", "4-4-2", rng, used)
+    value_players(home + away, rng)
+    match = Match(home, away, seed=5)
+    match.period, match.possession = 1, 0                           # home attack +x (goal at x = 105)
+    match.place_for_kickoff()
+    match.holder = 9
+    return match
+
+
+def test_a_foul_in_the_box_is_a_penalty_and_outside_it_a_free_kick():
+    match = kicked_off_match()
+    match.ball = np.array([97.0, 34.0])
+    match.foul(fouler=20, frame=10)
+    assert match.events[0]["Type"] == "FAULT RECEIVED" and match.restart["kind"] == "PENALTY"
+    np.testing.assert_allclose(match.restart["spot"], [94.0, 34.0])   # 11 m out
+    match = kicked_off_match()
+    match.ball = np.array([60.0, 30.0])
+    match.foul(fouler=20, frame=10)
+    assert match.restart["kind"] == "FREE KICK" and match.restart["side"] == 0
+    np.testing.assert_allclose(match.restart["spot"], [60.0, 30.0])
+
+
+def test_offside_is_beyond_the_second_last_defender_and_the_ball_and_corners_go_to_the_flag():
+    match = kicked_off_match()
+    away = np.flatnonzero(match.active & (match.team == 1))
+    match.pos[away] = [50.0, 34.0]
+    match.pos[away[:2]] = [[95.0, 34.0], [90.0, 30.0]]              # keeper and last defender
+    match.ball = np.array([60.0, 34.0])
+    match.pos[3], match.pos[4] = [92.0, 20.0], [89.0, 20.0]
+    assert match.offside(3) and not match.offside(4)                 # beyond the line at 90 m, or level-ish
+    match.ball = np.array([93.0, 34.0])
+    assert not match.offside(3)                                      # never offside behind the ball
+    match.corner(0, frame=10, near=np.array([105.0, 5.0]))
+    assert match.restart["kind"] == "CORNER KICK"
+    np.testing.assert_allclose(match.restart["spot"], [104.7, 0.3])

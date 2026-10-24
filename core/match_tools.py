@@ -402,9 +402,15 @@ def build_match_facts(game: str, events: pd.DataFrame, roster: pd.DataFrame,
         on_target = int(side_shots["Subtype"].astype(str).str.startswith("ON TARGET").sum())
         all_passes = int((events["Type"] == "PASS").sum())
         share = round(100 * passes / all_passes) if all_passes else 0
+        rival = events[events["Team"] != side]
+        fouls = int((rival["Type"] == "FAULT RECEIVED").sum())          # fouls this side committed
+        yellows = int(((mine["Type"] == "CARD") & (mine["Subtype"] == "YELLOW")).sum())
+        corners = int(((mine["Type"] == "SET PIECE") & (mine["Subtype"] == "CORNER KICK")).sum())
+        offsides = int((mine["Type"] == "OFFSIDE").sum())
         add("team", f"{club}: {len(side_shots)} shots ({on_target} on target), {completed} of {passes} "
                     f"passes completed ({round(100 * completed / passes) if passes else 0}%), "
-                    f"{share}% of the match's passes.")
+                    f"{share}% of the match's passes; {fouls} fouls, {yellows} yellow cards, "
+                    f"{corners} corners, {offsides} offsides.")
     for side, club in club_of_side.items():
         text = team_offball_text(side, club, tables)
         if text:

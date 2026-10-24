@@ -20,7 +20,7 @@ work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 [[ -f "$root/data/synthetic/scored.pkl" ]] || { echo "Run scripts/precompute_scores.py first." >&2; exit 1; }
 
 echo "Linux wheels..."
-grep -v '^pytest' "$root/requirements.txt" > "$work/requirements.txt"
+grep -vE '^(pytest|esprima)' "$root/requirements.txt" > "$work/requirements.txt"
 "$root/.venv/bin/pip" install -q --disable-pip-version-check --only-binary=:all: \
     --platform manylinux_2_28_x86_64 --platform manylinux_2_17_x86_64 --platform manylinux2014_x86_64 \
     --implementation cp --python-version 3.13 --abi cp313 \

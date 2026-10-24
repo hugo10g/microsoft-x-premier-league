@@ -29,7 +29,7 @@ PITCH_LENGTH, PITCH_WIDTH = 105.0, 68.0   # metres; Metrica's sample data assume
 
 # Events after which a team is in control of the ball, and ones after which nobody is.
 POSSESSION_EVENTS = {"PASS", "SHOT", "RECOVERY", "BALL LOST", "SET PIECE"}
-DEAD_BALL_EVENTS = {"BALL OUT"}
+DEAD_BALL_EVENTS = {"BALL OUT", "FAULT RECEIVED", "OFFSIDE"}   # the referee stops play
 
 
 @dataclass

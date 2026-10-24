@@ -1,5 +1,4 @@
 import re
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +10,6 @@ from ui.payload import build_window
 T = 4
 BALL = np.array([50.0, 34.0])
 HTML = Path(__file__).resolve().parents[1] / "ui" / "pitch_player.html"
-ESPRIMA = Path("/private/tmp/claude-501/-Users-hugoteng-Desktop-Microsoft-x-Premier-League/"
-               "090d1f4e-432c-4519-92c2-41db49e10e38/scratchpad/jspkg")
 
 
 def tracking() -> TrackingData:
@@ -90,8 +87,6 @@ def test_no_head_data_leaves_the_payload_without_head(head_yaw):
 
 
 def test_player_script_parses():
-    if str(ESPRIMA) not in sys.path:
-        sys.path.insert(0, str(ESPRIMA))
-    esprima = pytest.importorskip("esprima")
+    esprima = pytest.importorskip("esprima")                      # a test dependency (requirements.txt)
     script = re.search(r"<script>(.*)</script>", HTML.read_text(), re.S).group(1)
     esprima.parseScript(script.replace("__DATA__", "{}"))

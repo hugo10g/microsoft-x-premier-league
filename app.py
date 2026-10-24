@@ -864,7 +864,7 @@ if page == "Off-Ball Index":
 - **Formula**: subscore = weighted mean of its metric scores; index = weighted mean of the
   subscores. A missing metric drops out and the weights renormalise; *Coverage* is the share of the
   weight observed, and below {INDEX_CONFIG['min_coverage']:.0%} there is no index.
-- **Caveats**: lane cuts and pressure intensity overlap (ρ ≈ 0.79), so pressing counts nearly twice
+- **Caveats**: lane cuts, pressure intensity and pressures won overlap (ρ ≈ 0.8), so pressing volume dominates
   within Defence; defensive responsibility also reflects the team's press; Spacing and Creation do not
   track any hidden talent in this league, so read them as role context. Six matches is a small sample:
   one rank moves a percentile by 7-10 points. Full method: `docs/composite_index.md`.

@@ -13,6 +13,9 @@ The match engine, frame by frame:
                 sooner under pressure. A struck ball slows as it travels; it rolls into
                 the receiver's stride, a save ends in the keeper's hands, a goal in the
                 net, and a dead ball is brought back to its restart spot (never teleported)
+    rules       fouls (free kicks, penalties in the box, yellow cards), offside at the
+                moment of the pass, corners from saves parried and shots deflected
+                behind, and opponents 9.15 m from a free kick or corner
     shape       each team holds its formation slots, a block that slides with the
                 ball: higher and wider in possession, deeper and narrower without it
     roles       the nearest defenders press the ball, attackers make forward runs
@@ -131,8 +134,8 @@ PRESS_DRIVE = {"Defensive Midfield": 1.8, "Central Midfield": 1.2, "Centre-Forwa
 # Shooting, tuned so a match averages about 25 shots, a third on target, and
 # 2.8 goals (a Premier League season's rates): how readily a player shoots from a
 # given distance, and how often an on-target shot beats the keeper.
-SHOT_TENDENCY = 0.75
-FINISH_FACTOR = 1.23
+SHOT_TENDENCY = 1.0
+FINISH_FACTOR = 1.9
 # After a turnover, players near the ball react after REACTION_BASE + REACTION_SLOW *
 # (1 - work rate) seconds, plus a random REACTION_JITTER (mean, s) per turnover, then sprint
 # for TRANSITION_BURST s: attackers forward into space, defenders back goal-side of the ball.
@@ -154,6 +157,18 @@ RESTART_PAUSE, RETURN_SPEED = 1.5, 10.0    # s a dead ball rests, then m/s back 
 # are first-time passes, and a holder closed down to PRESSURE_RELEASE m plays within a
 # reaction time.
 ONE_TOUCH, PRESSURE_RELEASE = 0.15, 2.0
+# Rules. A challenge at tackling distance is a foul FOUL_CHANCE x (0.6 + 0.8 pressing) of the
+# time (x BOX_CARE inside the defender's own box, where it is a penalty); YELLOW_SHARE of fouls
+# are booked, once per player (no second yellows or reds: it stays 11 v 11). A receiver beyond
+# the second-last opponent, the ball and halfway when the pass is played is offside; passers
+# mostly see it (OFFSIDE_AVOID off the option's score). Some saves are parried and some wide
+# shots deflected behind for a corner.
+FOUL_CHANCE, BOX_CARE, YELLOW_SHARE = 0.1, 0.6, 0.17
+WALL_DISTANCE = 9.15                         # m opponents keep from a free kick or corner
+PENALTY_SPOT, BOX_DEPTH, BOX_HALF_WIDTH = 11.0, 16.5, 20.16
+PENALTY_ON_TARGET, PENALTY_SCORES = 0.85, 0.9   # on target; scored when on target
+SAVE_TO_CORNER, MISS_TO_CORNER = 0.4, 0.5
+OFFSIDE_AVOID = 4.0
 
 
 def wrap_degrees(angle):
@@ -267,6 +282,9 @@ class Match:
         self.check_onsets: list[list[int]] = [[] for _ in range(n)]
         self.holder_checks: int | None = None         # the holder's checks before receiving
         self.next_decision, self.rushed = 0, False    # when the holder acts; already closed down?
+        self.booked: set[int] = set()                 # players with a yellow card
+        self.runs: dict = {}                          # player -> (aim, until frame)
+        self.flight = self.holder = self.receiver = self.restart = None
         self.events: list[dict] = []
         self.schedule_substitutions()
 
@@ -346,6 +364,69 @@ class Match:
         return {"kind": kind, "from": here, "to": to, "start": frame, "end": frame + max(2, int(np.ceil(seconds * FPS))),
                 "v0": v0, "decel": decel, **fields}
 
+    def in_box(self, point: np.ndarray, side: int) -> bool:
+        """Is `point` inside the penalty area `side` attacks?"""
+        goal = self.goal_of(side)
+        return abs(point[0] - goal[0]) <= BOX_DEPTH and abs(point[1] - W / 2) <= BOX_HALF_WIDTH
+
+    def offside_line(self, side: int) -> float:
+        """`side`'s offside line as a depth (x times the attacking direction): the second-last
+        opponent, but never behind halfway or the ball."""
+        s = self.side_sign(side)
+        rivals = np.sort(self.pos[self.active & (self.team != side), 0] * s)
+        return max(rivals[-2], L / 2 * s, self.ball[0] * s)
+
+    def offside(self, k: int) -> bool:
+        side = int(self.team[k])
+        return bool(self.pos[k, 0] * self.side_sign(side) > self.offside_line(side) + 0.3)
+
+    def shoot(self, frame: int, aim: np.ndarray, on_target: bool, scores: bool) -> None:
+        """The holder strikes at `aim` on the goal line: into the net, to the keeper, or wide."""
+        holder, side, here = self.holder, self.possession, self.ball.copy()
+        keepers = np.flatnonzero(self.keeper & self.active & (self.team == 1 - side))
+        keeper = int(keepers[0]) if len(keepers) else self.nearest(1 - side, aim)
+        line = aim - here
+        heading = line / max(np.linalg.norm(line), 1e-6)
+        if scores:                                     # on into the net
+            to = aim + heading * NET_DEPTH / max(abs(heading[0]), 0.2)
+        elif on_target:                                # where the keeper meets it
+            reach = np.clip(((self.pos[keeper] - here) @ line) / max(line @ line, 1e-6), 0.7, 1.0)
+            to = here + reach * line
+        else:                                          # wide, on past the line
+            to = aim + heading * MISS_RUN_ON / max(abs(heading[0]), 0.2)
+        to[1] = np.clip(to[1], -2.0, W + 2.0)
+        power = 22 + 8 * self.players[holder].finishing + self.rng.normal(0, 2)
+        self.flight = self.strike("shot", here, to, power, SHOT_DECEL, frame, on_target=on_target,
+                                  goal=scores, shooter=holder, keeper=keeper)
+        self.holder = None
+
+    def foul(self, fouler: int, frame: int) -> None:
+        """`fouler` brings down the holder: a free kick there, or a penalty inside the box."""
+        side, spot = self.possession, self.ball.copy()
+        self.log(side, "FAULT RECEIVED", "", frame, frame, self.holder, None, spot, spot)
+        if fouler not in self.booked and self.rng.random() < YELLOW_SHARE:
+            self.booked.add(fouler)
+            self.log(1 - side, "CARD", "YELLOW", frame, frame, fouler, None, spot, spot)
+        if self.in_box(spot, side):
+            mates = np.flatnonzero(self.active & (self.team == side) & ~self.keeper)
+            taker = int(mates[np.argmax([self.players[k].finishing for k in mates])])
+            penalty = self.goal_of(side) - np.array([self.side_sign(side) * PENALTY_SPOT, 0])
+            self.dead_ball(side, penalty, frame, "PENALTY", 6.0, taker=taker)
+        else:
+            self.dead_ball(side, np.clip(spot, [1.0, 1.0], [L - 1.0, W - 1.0]), frame, "FREE KICK", 4.0)
+
+    def take_penalty(self, frame: int) -> None:
+        on_target = self.rng.random() < PENALTY_ON_TARGET
+        corner = self.rng.choice([-1.0, 1.0]) * (self.rng.uniform(0.8, 3.3) if on_target else self.rng.uniform(3.9, 5.5))
+        self.shoot(frame, self.goal_of(self.possession) + np.array([0, corner]), on_target,
+                   on_target and self.rng.random() < PENALTY_SCORES)
+
+    def corner(self, side: int, frame: int, near: np.ndarray) -> None:
+        """A corner to `side` at the flag nearest `near`."""
+        goal = self.goal_of(side)
+        flag = np.array([np.clip(goal[0], 0.3, L - 0.3), 0.3 if near[1] < W / 2 else W - 0.3])
+        self.dead_ball(side, flag, frame, "CORNER KICK", 7.0)
+
     def hold_frames(self, k: int) -> int:
         """Frames player k keeps a ball they've just won or received (see ONE_TOUCH)."""
         rivals = self.active & (self.team != self.team[k])
@@ -389,30 +470,20 @@ class Match:
             # conversion near a real league's (about one shot in ten).
             aim = goal + np.array([0, self.rng.normal(0, (4.0 + distance / 5) * (1.3 - 0.6 * p.finishing))])
             on_target = abs(aim[1] - W / 2) < 3.66
-            scores = on_target and self.rng.random() < min(0.9, chance * FINISH_FACTOR)
-            keepers = np.flatnonzero(self.keeper & self.active & (self.team == 1 - side))
-            keeper = int(keepers[0]) if len(keepers) else self.nearest(1 - side, goal)
-            line = aim - here
-            heading = line / max(np.linalg.norm(line), 1e-6)
-            if scores:                                     # on into the net
-                to = aim + heading * NET_DEPTH / max(abs(heading[0]), 0.2)
-            elif on_target:                                # where the keeper meets it
-                reach = np.clip(((self.pos[keeper] - here) @ line) / max(line @ line, 1e-6), 0.7, 1.0)
-                to = here + reach * line
-            else:                                          # wide, on past the line
-                to = aim + heading * MISS_RUN_ON / max(abs(heading[0]), 0.2)
-            to[1] = np.clip(to[1], -2.0, W + 2.0)
-            power = 22 + 8 * p.finishing + self.rng.normal(0, 2)
-            self.flight = self.strike("shot", here, to, power, SHOT_DECEL, frame, on_target=on_target,
-                                      goal=scores, shooter=holder, keeper=keeper)
-            self.holder = None
+            self.shoot(frame, aim, on_target, on_target and self.rng.random() < min(0.9, chance * FINISH_FACTOR))
             return
-        if pressure < 1.6 and self.rng.random() < 0.35 * (1.1 - p.passing) * lose_factor:
+        if pressure < 1.6:                                 # at tackling distance: foul, tackle or neither
             winner = self.nearest(1 - side, here)
-            self.log(side, "BALL LOST", "THEFT", frame, frame, holder, None, here, here)
-            self.log(1 - side, "RECOVERY", "THEFT", frame, frame, winner, None, here, here)
-            self.turnover(winner, frame)
-            return
+            fouls = FOUL_CHANCE * (0.6 + 0.8 * self.press[winner]) * (BOX_CARE if self.in_box(here, side) else 1)
+            roll = self.rng.random()
+            if roll < fouls:
+                self.foul(winner, frame)
+                return
+            if roll < fouls + 0.35 * (1.1 - p.passing) * lose_factor:
+                self.log(side, "BALL LOST", "THEFT", frame, frame, holder, None, here, here)
+                self.log(1 - side, "RECOVERY", "THEFT", frame, frame, winner, None, here, here)
+                self.turnover(winner, frame)
+                return
 
         mates, lead, length, weights = self.pass_options(holder)
         pick = int(self.rng.choice(len(mates), p=weights))
@@ -429,7 +500,9 @@ class Match:
                                     + pass_shift)))
         v0 = min(9 + 0.3 * length[pick], 26.0)
         flight = self.strike("pass", here, end, v0, PASS_DECEL, frame, passer=holder, receiver=receiver)
-        if self.rng.random() > success:
+        if self.offside(receiver):                         # flagged when the receiver plays it
+            flight.update(kind="offside", offside_at=self.pos[receiver].copy())
+        elif self.rng.random() > success:
             if self.rng.random() < 0.3:                            # overhit: out of play
                 out = here + seg * 1.6
                 out[1] = np.clip(out[1], -1.5, W + 1.5)
@@ -460,7 +533,8 @@ class Match:
         forward = span[:, 0] * self.side_sign(side)
         openness = np.linalg.norm(lead[:, None, :] - self.pos[opponents][None, :, :], axis=2).min(axis=1)
         score = 0.06 * forward + 0.35 * np.minimum(openness, 8) - 0.025 * length \
-            - 3.0 * self.keeper[mates] - 4.0 * (length > 45)
+            - 3.0 * self.keeper[mates] - 4.0 * (length > 45) \
+            - OFFSIDE_AVOID * (self.pos[mates, 0] * self.side_sign(side) > self.offside_line(side) + 0.3)
         weights = np.exp((score - score.max()) / 0.8)
         return mates, lead, length, weights / weights.sum()
 
@@ -487,6 +561,10 @@ class Match:
             self.holder = f["receiver"]
             self.holder_checks = self.recent_checks(f["receiver"], frame)
             self.next_decision, self.rushed = frame + self.hold_frames(f["receiver"]), False
+        elif f["kind"] == "offside":
+            self.log(side, "PASS", "", f["start"], frame, f["passer"], None, f["from"], f["to"])
+            self.log(side, "OFFSIDE", "", frame, frame, f["receiver"], None, f["offside_at"], f["offside_at"])
+            self.dead_ball(1 - side, np.clip(f["offside_at"], [1.0, 1.0], [L - 1.0, W - 1.0]), frame, "FREE KICK", 4.0)
         elif f["kind"] == "intercepted":
             self.log(side, "BALL LOST", "INTERCEPTION", f["start"], frame, f["passer"], None, f["from"], f["to"])
             self.log(1 - side, "RECOVERY", "INTERCEPTION", frame, frame, f["interceptor"], None, f["to"], f["to"])
@@ -504,9 +582,16 @@ class Match:
                 self.score[side] += 1
                 self.possession = 1 - side
                 self.dead_ball(1 - side, np.array([L / 2, W / 2]), frame, "KICK OFF", 8.0, kickoff=True)
+            elif f["on_target"] and self.rng.random() < SAVE_TO_CORNER:     # parried behind
+                self.log(1 - side, "BALL OUT", "", frame, frame, keeper, None, f["to"], f["to"])
+                self.corner(side, frame, f["to"])
             elif f["on_target"]:
                 self.log(1 - side, "RECOVERY", "SAVED SHOT", frame, frame, keeper, None, f["to"], f["to"])
                 self.turnover(keeper, frame)
+            elif self.rng.random() < MISS_TO_CORNER:                         # deflected behind
+                blocker = self.nearest(1 - side, f["to"], outfield=True)
+                self.log(1 - side, "BALL OUT", "", frame, frame, blocker, None, f["to"], f["to"])
+                self.corner(side, frame, f["to"])
             else:
                 self.log(side, "BALL OUT", "", frame, frame, f["shooter"], None, f["to"], f["to"])
                 spot = np.array([5.5 if f["to"][0] < L / 2 else L - 5.5, W / 2])
@@ -555,10 +640,13 @@ class Match:
         s = self.side_sign(side)
 
         if self.restart is not None:
-            taker = self.restart["taker"]
-            targets[taker], urgency[taker] = self.restart["spot"], 0.8
-            return targets, urgency
+            return self.restart_targets(targets, urgency)
         ball_target = self.flight["to"] if self.flight else self.ball
+        line = self.offside_line(side) - 0.8                  # attackers hold the line unless running
+        receiver = self.flight.get("receiver") if self.flight else None
+        holding = self.active & (self.team == side) & ~self.keeper & (targets[:, 0] * s > line)
+        holding[[k for k in (self.holder, receiver) if k is not None]] = False
+        targets[holding, 0] = line * s
         if self.holder is not None:                            # carry forward when there's room
             room = np.min(np.linalg.norm(self.pos[self.active & (self.team != side)] - self.pos[self.holder], axis=1))
             carry = self.pos[self.holder] + np.array([s * (6 if room > 4 else 1.5), self.rng.normal(0, 1)])
@@ -566,7 +654,7 @@ class Match:
             targets[self.holder], urgency[self.holder] = carry, 0.45 + 0.04 * min(room, 6)
         if self.holder is not None and np.linalg.norm(self.ball - self.pos[self.holder]) > 1.2:
             targets[self.holder], urgency[self.holder] = self.ball, 0.9      # meet the ball
-        if self.flight and self.flight.get("receiver") is not None and self.flight["kind"] == "pass":
+        if self.flight and self.flight.get("receiver") is not None and self.flight["kind"] in ("pass", "offside"):
             targets[self.flight["receiver"]], urgency[self.flight["receiver"]] = self.flight["to"], 0.9
         if self.flight and self.flight["kind"] == "shot":                    # the keeper goes for it
             targets[self.flight["keeper"]] = np.clip(self.flight["to"], [0.5, 0.5], [L - 0.5, W - 0.5])
@@ -618,6 +706,36 @@ class Match:
             screen = screen / max(np.linalg.norm(screen), 1e-6) * 1.6 * self.press[k]
             targets[k] = ball_target + screen
             urgency[k] = min(1.0, (0.45 + 0.45 * self.press[k]) * self.drive[k])
+        return targets, urgency
+
+    def restart_targets(self, targets: np.ndarray, urgency: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Where players set up for a restart: the taker on the ball; for a penalty everyone else
+        outside the box and the keeper on the line; for a corner both teams in the box; and
+        opponents WALL_DISTANCE from a free kick or corner."""
+        r = self.restart
+        side, spot, kind = r["side"], r["spot"], r["kind"]
+        s, goal = self.side_sign(side), self.goal_of(side)
+        outfield = self.active & ~self.keeper
+        if kind == "PENALTY":
+            edge = goal[0] - s * (BOX_DEPTH + 1)
+            inside = outfield & ((targets[:, 0] - edge) * s > 0)
+            targets[inside, 0] = edge
+            keeper = self.active & self.keeper & (self.team != side)
+            targets[keeper] = [goal[0] - s * 0.3, W / 2]
+        elif kind == "CORNER KICK":
+            attack, defend = outfield & (self.team == side) & (self.depth > 0.35), outfield & (self.team != side)
+            targets[attack, 0] = goal[0] - s * (6 + 6 * self.depth[attack])
+            targets[attack, 1] = W / 2 + 14 * self.lateral[attack]
+            targets[defend, 0] = goal[0] - s * (3 + 8 * (1 - self.depth[defend]))
+            targets[defend, 1] = W / 2 + 12 * self.lateral[defend]
+        if kind in ("FREE KICK", "CORNER KICK"):
+            away = targets - spot
+            gap = np.linalg.norm(away, axis=1)
+            close = self.active & (self.team != side) & (gap < WALL_DISTANCE)
+            direction = np.where(gap[:, None] > 1e-6, away / np.maximum(gap, 1e-6)[:, None], [-s, 0.0])
+            targets[close] = spot + direction[close] * (WALL_DISTANCE + 0.4)
+        targets[:] = np.clip(targets, [0.5, 0.5], [L - 0.5, W - 0.5])
+        targets[r["taker"]], urgency[r["taker"]] = spot, 0.8
         return targets, urgency
 
     def run_aim(self, k: int, kind: str, side: int) -> np.ndarray:
@@ -782,6 +900,8 @@ class Match:
                         self.holder, self.holder_checks = r["taker"], None
                         self.log(r["side"], "SET PIECE", r["kind"], frame, frame, r["taker"], None, r["spot"], r["spot"])
                         self.next_decision, self.rushed = frame + int(0.3 * FPS), True
+                        if r["kind"] == "PENALTY":
+                            self.take_penalty(frame)
                 elif self.flight is not None:
                     f, landed = self.flight, True                # no control step on top this frame
                     line, tau = f["to"] - f["from"], (frame - f["start"]) * DT

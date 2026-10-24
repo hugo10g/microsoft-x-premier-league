@@ -9,3 +9,4 @@ openai==3.37.0
 agent-framework-core==1.23.0
 agent-framework-openai==1.17.0
 pytest==9.1.1
+esprima==4.0.1          # tests: checks the pitch player's JavaScript parses

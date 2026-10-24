@@ -8,7 +8,7 @@ Event data records the pass, the shot and the tackle. It misses the run that dra
 - it prices players against their off-ball contribution;
 - a team of AI agents writes match reports that are fact-checked against the data.
 
-> **All data is synthetic.** The league, clubs, players, market values and matches are fictional, simulated by `core/synthetic.py` at 25 Hz with a head-orientation feed. No real match data, names or trademarks are used anywhere.
+> **All data is synthetic.** The league, clubs, players, market values and matches are fictional, simulated by `core/synthetic.py` at 25 Hz with a head-orientation feed. The matches follow the laws of the game: fouls, yellow cards, free kicks, penalties, offside and corners, at Premier League rates. No real match data, names or trademarks are used anywhere.
 
 ## What it does
 
@@ -93,15 +93,15 @@ The simulator gives every player hidden talents that the metrics never see. The 
 
 | Check | ρ |
 |---|---|
-| Scan rate vs awareness | 0.88 |
-| Transition reaction vs work rate | 0.85 |
-| Transition latency vs work rate | −0.76 |
-| Lane cuts vs pressing | 0.52 |
-| Decoy runs vs work rate | 0.38 (carried by forwards at 0.68; midfielders' decoy value doesn't yet track work rate) |
-| Off-Ball Index vs combined off-ball talents | 0.73 |
-| Pressures won vs pressing | 0.62 |
+| Scan rate vs awareness | 0.87 |
+| Transition reaction vs work rate | 0.83 |
+| Transition latency vs work rate | −0.83 |
+| Lane cuts vs pressing | 0.59 |
+| Decoy runs vs work rate | 0.29 (carried by forwards at 0.85; midfielders' decoy value doesn't yet track work rate) |
+| Off-Ball Index vs combined off-ball talents | 0.57 |
+| Pressures won vs pressing | 0.48 |
 
-Receivers who made no head check kept the ball 74% of the time, against 80% with 3+ checks (7,900 receptions).
+Receivers who made no head check kept the ball 71% of the time, against 82% with 3+ checks (7,837 receptions).
 
 ## Run it locally
 
