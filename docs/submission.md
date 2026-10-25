@@ -26,3 +26,4 @@ Match coverage follows the ball, but most of a player's game happens away from i
   4. **Match Report** → Generate report (open the Agent trace).
   5. **Model Check.**
 - **Code (public):** https://github.com/hugo10g/microsoft-x-premier-league.
+  6. **Video:** https://youtube.com/watch?v=O_Za9cgzAP4&feature=youtu.be
