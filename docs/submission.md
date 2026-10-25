@@ -28,16 +28,24 @@ Broadcasts and stats apps tell you who passed and who shot. They miss the decoy 
 
 ## Demo video (under 2 minutes, no music or third-party marks)
 
+Film **Matchday 2 · Harbourside FC v Redmoor Rovers**: six goals and a penalty. Follow **Umar Lindqvist**, who scores twice.
+
+**Before you record:**
+- Open the site and wait for it to load.
+- Pick Matchday 2 in the sidebar.
+- On Match Report, generate the **Broadcaster** report in **Español** once, so it's ready.
+- Return to Live Match at minute 0, in **Fan** mode, with no player followed.
+
 | Time | On screen | Voice-over |
 |---|---|---|
-| 0:00–0:12 | Live Match at kick-off. Press ▶ Play live | "Football is ninety percent off the ball, and almost none of it is on screen. This is Off-Ball Value." |
-| 0:12–0:32 | Commentary scrolls: a goal with its assist and pass difficulty, a press, a scan. Stats and the rhythm chart update | "As the match arrives event by event, it explains *why* moments matter: this press cut eighty percent of the passing lanes; this goal came from a 32-metre pass rated 51 out of 100." |
-| 0:32–0:45 | Sidebar: Analyst mode, then follow a player and choose Español | "Every fan gets their own match: analyst or casual, your club, your player, your language." |
-| 0:45–1:05 | Tactical Playback: a highlight clip. The followed player is ringed with "⚡ 26 km/h · 412 m"; a shot shows "⚽ 97 km/h" | "On the pitch, follow your player's sprints and distance, and see every shot's speed. Clips for every pillar: scanning, space, pressing and transitions." |
-| 1:05–1:25 | Match Report: generate the Broadcaster version in Spanish; open the agent trace | "Four agents on Microsoft Agent Framework and Foundry write the recap. A code fact-checker rejects any invented time, number or player, and sends it back." |
-| 1:25–1:40 | Off-Ball Index radar, then the Player Profile price breakdown | "Off-ball work becomes an index, a radar and an ML price that shows its working." |
-| 1:40–1:52 | Model Check table | "And it's honest: the simulator hides each player's true talent, and the metrics recover it. Scanning, 0.87." |
-| 1:52–1:58 | The live URL | "Live on Azure Container Apps. Off-Ball Value." |
+| 0:00–0:12 | Live Match at kick-off. Click **▶ Play live** (3 min per second) | "Football is ninety percent off the ball, and almost none of it is on screen. This is Off-Ball Value." |
+| 0:12–0:32 | Let it run past 30'. The 15:12 press and the 30:26 goal appear; the stats and rhythm chart update. Pause | "As the match arrives event by event, it explains why moments matter. This press cut 83 percent of the passing lanes. This goal came from a 32-metre pass rated 54 out of 100 for difficulty." |
+| 0:32–0:45 | Sidebar: Mode **Analyst**, Follow a player **Umar Lindqvist**, Language **Español**. The feed turns Spanish and stars his moments | "Every fan gets their own match: analyst or casual, your club, your player, your language." |
+| 0:45–1:05 | **Tactical Playback** → Highlights **Goals** → click his 30:26 goal. He's ringed with distance and sprint-speed tags; the shot shows its speed | "On the pitch, follow your player's sprints and distance, and see the shot's speed. One-click clips for every pillar: scanning, space, pressing and transitions." |
+| 1:05–1:25 | **Match Report**: the Spanish Broadcaster report and its ✅ fact-check badge. Open **Agent trace** | "Four agents on Microsoft Agent Framework and Foundry write the recap. A code fact-checker rejects any invented time, number or player, and sends it back." |
+| 1:25–1:40 | **Off-Ball Index**: the radar. Then **Player Profile**: scroll to "How the ML price is calculated" | "Off-ball work becomes an index, a radar and an ML price that shows its working." |
+| 1:40–1:52 | **Model Check** table | "And it's honest: the simulator hides each player's true talent, and the metrics recover it. Scanning, 0.87." |
+| 1:52–1:58 | Browser address bar showing the live URL | "Live on Azure Container Apps. Off-Ball Value." |
 
 ## Testing instructions
 
