@@ -2,22 +2,19 @@
 
 ## Pitch
 
-Ninety percent of football happens off the ball: the decoy run that opens a lane, the press that forces a bad pass, the head check before receiving. None of it reaches the screen. **Off-Ball Value** is an AI match-intelligence app that makes that work visible, live, for every fan.
+**Off-Ball Value** is an AI match-intelligence app that measures and explains what footballers do without the ball, live, for fans, studios and broadcasters.
 
-It ingests a match event by event and turns 25 Hz tracking into off-ball metrics, pass difficulty and shot speed. Then it explains why each moment matters. A team of agents on **Microsoft Agent Framework** and **Microsoft Foundry** writes the recap. An Analyst, a Narrator and a Persona editor draft it, and a code fact-checker sends back any claim the data doesn't support. Each fan chooses their own view: Fan or Analyst mode, their club, a player to follow, and one of nine languages. Broadcasters get a timed overlay feed for on-screen graphics. It runs on **Azure Container Apps**, and the numbers are proven: the simulator hides each player's real talent, and the metrics recover it.
+Match coverage follows the ball, but most of a player's game happens away from it. Decoy runs, pressing and head checks decide matches, yet no stat captures them. Off-Ball Value turns 25 Hz tracking from a synthetic, football-realistic league into those missing numbers, and AI agents explain them in plain language.
 
-**How it scores on each judging criterion:**
-- **Technological implementation:** a synthetic league with the laws of the game (fouls, cards, offsides, penalties). Its tracking and events become decoy runs, lane cuts, press-and-win, transition speed and scanning. All of it feeds a composite Off-Ball Index and a machine-learning price that shows its working.
-- **Agentic design:** a multi-agent recap with a verify-and-revise loop, plus an AI Scout that answers questions from the league data.
-- **Real-world impact and production readiness:**
-  - It's a public app with no login.
-  - It's containerised and built by GitHub Actions.
-  - Precomputed scores and shared caches make every page open in under a second.
-  - It has 176 automated tests.
-- **User experience:** a live scoreboard with no spoilers, commentary that explains each moment, a 2D tactical pitch with highlight clips, and player radars.
-- **Fit with the brief:** explainable match intelligence, real-time narratives, automated recaps and personalized experiences for fans, studios and broadcasters.
+**What it does**
+- **Live Match:** follows a match event by event, with a running score, stats, and commentary on why each moment matters.
+- **Explainable metrics:** decoy runs, passing lanes cut, press-and-win, transition speed, head checks, pass difficulty and shot speed. They combine into an Off-Ball Index and a machine-learning player price that shows its working.
+- **Fact-checked recaps:** an Analyst, a Narrator and a Persona editor, built on Microsoft Agent Framework and Foundry, write each match report. A code fact-checker sends back any claim the data doesn't support. An AI Scout answers questions about the league.
+- **Personal:** Fan or Analyst mode, a favourite club, a player to follow, and nine languages.
+- **For broadcasters:** a timed overlay feed (JSON) for on-screen graphics.
+- **Proven:** the simulator hides each player's true talent, and the metrics recover it.
 
-**Microsoft and Azure technology:** Microsoft Foundry (`gpt-4.1-mini`), Microsoft Agent Framework, Azure Container Apps and Azure Container Registry.
+**Built with:** Microsoft Foundry (`gpt-4.1-mini`), Microsoft Agent Framework, Azure Container Apps, Azure Container Registry and GitHub Actions. Covered by 176 automated tests.
 
 ## Demo video script
 
