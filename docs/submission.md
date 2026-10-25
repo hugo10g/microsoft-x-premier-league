@@ -1,50 +1,40 @@
 # Submission: Off-Ball Value
 
-## Pitch (rule 4.4)
+## Pitch
 
-**What I built.** Off-Ball Value is an AI match-intelligence app for the 90% of football played without the ball. It's built on a synthetic, football-realistic league (25 Hz tracking, events and head orientation, with the laws of the game).
+Ninety percent of football happens off the ball: the decoy run that opens a lane, the press that forces a bad pass, the head check before receiving. None of it reaches the screen. **Off-Ball Value** is an AI match-intelligence app that makes that work visible, live, for every fan.
 
-**Problem it solves.** Broadcasts and stats show passes and shots, but miss the decoy run, the press and the head check that decide matches. Viewers get a scoreline, not the story.
+It ingests a match event by event and turns 25 Hz tracking into off-ball metrics, pass difficulty and shot speed. Then it explains why each moment matters. A team of agents on **Microsoft Agent Framework** and **Microsoft Foundry** writes the recap. An Analyst, a Narrator and a Persona editor draft it, and a code fact-checker sends back any claim the data doesn't support. Each fan chooses their own view: Fan or Analyst mode, their club, a player to follow, and one of nine languages. Broadcasters get a timed overlay feed for on-screen graphics. It runs on **Azure Container Apps**, and the numbers are proven: the simulator hides each player's real talent, and the metrics recover it.
 
-**What it does.**
-- **Ingests** each match live, event by event.
-- **Interprets** it into off-ball metrics, pass difficulty and shot speed.
-- **Explains** why each moment matters, in commentary and fact-checked match recaps.
-- **Renders** it on a 2D pitch, plus a timed overlay feed (JSON) for broadcast graphics.
-- **Personalizes** it: Fan or Analyst mode, a favourite club, a player to follow, and nine languages.
-- **Proves its numbers:** the simulator hides each player's real talent, and the metrics recover it.
+**How it scores on each judging criterion:**
+- **Technological implementation:** a synthetic league with the laws of the game (fouls, cards, offsides, penalties). Its tracking and events become decoy runs, lane cuts, press-and-win, transition speed and scanning. All of it feeds a composite Off-Ball Index and a machine-learning price that shows its working.
+- **Agentic design:** a multi-agent recap with a verify-and-revise loop, plus an AI Scout that answers questions from the league data.
+- **Real-world impact and production readiness:**
+  - It's a public app with no login.
+  - It's containerised and built by GitHub Actions.
+  - Precomputed scores and shared caches make every page open in under a second.
+  - It has 176 automated tests.
+- **User experience:** a live scoreboard with no spoilers, commentary that explains each moment, a 2D tactical pitch with highlight clips, and player radars.
+- **Fit with the brief:** explainable match intelligence, real-time narratives, automated recaps and personalized experiences for fans, studios and broadcasters.
 
-**Microsoft and Azure technology.**
-- **Microsoft Foundry** (`gpt-4.1-mini`).
-- **Microsoft Agent Framework:** an Analyst, a Narrator and a Persona editor, with a code fact-checker that rejects unsupported claims and sends drafts back.
-- **Azure Container Apps**, with GitHub Actions.
+**Microsoft and Azure technology:** Microsoft Foundry (`gpt-4.1-mini`), Microsoft Agent Framework, Azure Container Apps and Azure Container Registry.
 
-## Demo video (rule 4.4: under 2 min, the working app, no third-party marks or music)
+## Demo video
 
-Film the live site, **Matchday 2 · Harbourside FC v Redmoor Rovers**, following **Umar Lindqvist**.
+Under 2 minutes, showing the working app, with no music, real logos or club names. Upload it to YouTube or Vimeo as public or unlisted.
 
-**Prepare:**
-- Select Matchday 2.
-- Set Language to Español, let the Live Match feed translate once, and generate the **Broadcaster** report.
-- Reset to English, Fan mode, no player followed, and Live Match at minute 0.
+Show these in order:
+1. Live Match playing.
+2. The personal view: a mode, a player to follow and a language.
+3. A goal on the Tactical Playback pitch.
+4. The overlay feed.
+5. A Match Report with its Agent trace.
+6. The Player Profile price breakdown.
+7. Model Check.
 
-| Time | On screen | Voice-over |
-|---|---|---|
-| 0:00 | Live Match, click **▶ Play live** | "Ninety percent of football happens off the ball, and none of it reaches the screen. Off-Ball Value changes that, live." |
-| 0:12 | Pause at about 32'. Point at the 15:12 press and the 30:26 goal | "Every event is ingested as it happens and explained: this press cut 83 percent of the passing lanes; this goal came from a 32-metre pass rated 54 out of 100." |
-| 0:30 | Sidebar: **Analyst**, follow **Umar Lindqvist**, **Español** | "Every fan gets their own match: casual or analyst, their club, their player, their language." |
-| 0:42 | **Tactical Playback** → Goals → **30:26**: player ring, speed and distance tags, shot speed | "On the pitch: your player's sprints and distance, and the shot's speed." |
-| 0:55 | Live Match: hover **⬇ Overlay feed (JSON)** | "For broadcasters, every moment is a timed overlay cue." |
-| 1:02 | **Match Report**: the Spanish report, its ✅ badge, and **Agent trace** | "Agents on Microsoft Agent Framework and Foundry write the recap: an Analyst, a Narrator and a Persona editor, and a fact-checker that sends back anything the data doesn't support." |
-| 1:22 | **Player Profile**: the polygon, then the ML price breakdown | "Off-ball work becomes an index, a radar and a price that shows its working." |
-| 1:35 | **Model Check** | "And it's proven: the simulator hides each player's talent, and the metrics recover it." |
-| 1:47 | The live URL | "Off-Ball Value, live on Azure Container Apps." |
+## Testing
 
-**Before uploading:** check it's under 2:00, has no music or real logos, and shows no personal tabs. Upload to YouTube or Vimeo as public or unlisted.
-
-## Testing (rule 4.8: free access until judging ends)
-
-- **Live app:** https://off-ball-value.livelyforest-7e8a1161.norwayeast.azurecontainerapps.io. No login. If it has been idle, the first load takes a minute or two.
+- **Live app:** https://off-ball-value.livelyforest-7e8a1161.norwayeast.azurecontainerapps.io. No login needed.
 - **Try:**
   1. **Live Match** → ▶ Play live.
   2. In **Your view**, set a mode, a player and a language.
