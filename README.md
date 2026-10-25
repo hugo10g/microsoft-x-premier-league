@@ -2,6 +2,9 @@
 
 **Explainable match intelligence for the 90% of the game that happens without the ball.**
 
+**▶ Live app:** https://off-ball-value.livelyforest-7e8a1161.norwayeast.azurecontainerapps.io (no login)<br>
+**🎬 Demo video:** https://youtube.com/watch?v=O_Za9cgzAP4
+
 Event data records the pass, the shot and the tackle. It misses the run that dragged a centre-back away, the shoulder check before receiving and the sprint the moment the ball was lost. Off-Ball Value measures that work from 25 Hz tracking data and makes it explainable:
 - it follows a match live, event by event, saying why each moment matters;
 - it plays any moment back on a 2D pitch;
