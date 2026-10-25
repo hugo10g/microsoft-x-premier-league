@@ -1,29 +1,28 @@
-# Submission: Off-Ball Value
+# Off-Ball Value
 
-## Pitch
+**AI match intelligence for the 90% of football played without the ball.**
 
-**Off-Ball Value** is an AI match-intelligence app that measures and explains what footballers do without the ball, live, for fans, studios and broadcasters.
+### The problem
+Broadcasts and stats follow the ball, but matches are decided away from it: the decoy run that opens space, the press that forces a bad pass, the head check before receiving. Fans never see that work, and no stat captures it.
 
-Match coverage follows the ball, but most of a player's game happens away from it. Decoy runs, pressing and head checks decide matches, yet no stat captures them. Off-Ball Value turns 25 Hz tracking from a synthetic, football-realistic league into those missing numbers, and AI agents explain them in plain language.
+### What it does
+Off-Ball Value plays a synthetic, football-realistic match event by event and explains each moment as it happens. For example: "this press cut 83% of the passing lanes", or "this goal came from a 32 m pass rated 54/100".
+- **Measures** decoy runs, passing lanes cut, press-and-win, transition speed and head checks from 25 Hz tracking. These combine into an Off-Ball Index and a machine-learning player price that shows how it was calculated.
+- **Explains** each match in a fact-checked report. An Analyst, a Narrator and a Persona editor write it, and a code fact-checker sends back any claim the data doesn't support. An AI Scout answers questions about the league.
+- **Personalizes:** Fan or Analyst mode, your club, a player to follow, and nine languages.
+- **Serves broadcasters** with a timed overlay feed for on-screen graphics.
+- **Proves itself:** the simulator hides each player's true talent, and the metrics recover it.
 
-**What it does**
-- **Live Match:** follows a match event by event, with a running score, stats, and commentary on why each moment matters.
-- **Explainable metrics:** decoy runs, passing lanes cut, press-and-win, transition speed, head checks, pass difficulty and shot speed. They combine into an Off-Ball Index and a machine-learning player price that shows its working.
-- **Fact-checked recaps:** an Analyst, a Narrator and a Persona editor, built on Microsoft Agent Framework and Foundry, write each match report. A code fact-checker sends back any claim the data doesn't support. An AI Scout answers questions about the league.
-- **Personal:** Fan or Analyst mode, a favourite club, a player to follow, and nine languages.
-- **For broadcasters:** a timed overlay feed (JSON) for on-screen graphics.
-- **Proven:** the simulator hides each player's true talent, and the metrics recover it.
+### Microsoft and Azure technology
+Microsoft Foundry (gpt-4.1-mini) · Microsoft Agent Framework · Azure Container Apps · Azure Container Registry · GitHub Actions. Covered by 176 automated tests.
 
-**Built with:** Microsoft Foundry (`gpt-4.1-mini`), Microsoft Agent Framework, Azure Container Apps, Azure Container Registry and GitHub Actions. Covered by 176 automated tests.
+### Try it (free, no login)
+https://off-ball-value.livelyforest-7e8a1161.norwayeast.azurecontainerapps.io
+1. **Live Match** → ▶ Play live.
+2. **Your view** → pick a mode, a player and a language.
+3. **Tactical Playback** → open a highlight clip.
+4. **Match Report** → Generate report, then open the Agent trace.
+5. **Model Check.**
 
-## Testing
-
-- **Live app:** https://off-ball-value.livelyforest-7e8a1161.norwayeast.azurecontainerapps.io. No login needed.
-- **Try:**
-  1. **Live Match** → ▶ Play live.
-  2. In **Your view**, set a mode, a player and a language.
-  3. **Tactical Playback** → a highlight clip.
-  4. **Match Report** → Generate report (open the Agent trace).
-  5. **Model Check.**
-- **Code (public):** https://github.com/hugo10g/microsoft-x-premier-league.
-  6. **Video:** https://youtube.com/watch?v=O_Za9cgzAP4&feature=youtu.be
+**Demo video:** https://youtube.com/watch?v=O_Za9cgzAP4
+**Code:** https://github.com/hugo10g/microsoft-x-premier-league
