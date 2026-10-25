@@ -55,24 +55,32 @@ def pass_quality(tr: TrackingData, events: pd.DataFrame) -> pd.DataFrame:
     """One row per pass: time, team, player, receiver, distance (m), completed, lane (m), difficulty, speed_kmh."""
     # An intercepted pass is logged as BALL LOST / INTERCEPTION: it was a pass, just not completed.
     passes = events[(events["Type"] == "PASS") | ((events["Type"] == "BALL LOST") & (events["Subtype"] == "INTERCEPTION"))]
-    rows = []
-    columns = ["Start Time [s]", "End Time [s]", "Start Frame", "Team", "From", "To", "Start X", "Start Y", "End X", "End Y"]
-    for t0, t1, event_frame, team, src, dst, sx, sy, ex, ey in passes[columns].itertuples(index=False):
-        start, end = np.array([sx, sy]), np.array([ex, ey])
-        line = end - start
-        length = float(np.linalg.norm(line))
-        f = _frame(tr, event_frame)
-        rivals = tr.positions[f, tr.teams != team]
-        rivals = rivals[~np.isnan(rivals).any(axis=1)]
-        t = np.clip(((rivals - start) @ line) / max(line @ line, 1e-6), 0.05, 0.95)
-        lane = float(np.min(np.linalg.norm(rivals - (start + t[:, None] * line), axis=1))) if len(rivals) else 10.0
-        pressed = float(np.min(np.linalg.norm(rivals - start, axis=1))) if len(rivals) else 10.0
-        forward = max(0.0, line[0] / max(length, 1e-6) * (1 if tr.attacks_right(team)[f] else -1))
-        difficulty = 100 * (0.6 * np.clip(1 - lane / 5, 0, 1) + 0.2 * np.clip(1 - pressed / 5, 0, 1) + 0.2 * forward)
-        rows.append((t0, team, src, dst if isinstance(dst, str) else None, length, isinstance(dst, str), lane, round(difficulty),
-                     length / max(t1 - t0, 0.04) * 3.6))
-    return pd.DataFrame(rows, columns=["time", "team", "player", "receiver", "distance", "completed", "lane",
-                                       "difficulty", "speed_kmh"])
+    columns = ["time", "team", "player", "receiver", "distance", "completed", "lane", "difficulty", "speed_kmh"]
+    if passes.empty:
+        return pd.DataFrame(columns=columns)
+    # All passes at once: (n, 2) ends, (n, P, 2) players at the moment of each pass.
+    start = passes[["Start X", "Start Y"]].to_numpy(float)
+    line = passes[["End X", "End Y"]].to_numpy(float) - start
+    length = np.linalg.norm(line, axis=1)
+    f = _frame(tr, passes["Start Frame"].to_numpy())
+    team = passes["Team"].to_numpy()
+    players = tr.positions[f]
+    rival = (tr.teams[None, :] != team[:, None]) & ~np.isnan(players).any(axis=-1)
+    along = np.clip(np.einsum("npk,nk->np", players - start[:, None], line) / np.maximum((line ** 2).sum(1), 1e-6)[:, None],
+                    0.05, 0.95)
+    gap = np.linalg.norm(players - (start[:, None] + along[..., None] * line[:, None]), axis=-1)
+    lane = np.where(rival, gap, np.inf).min(axis=1)
+    pressed = np.where(rival, np.linalg.norm(players - start[:, None], axis=-1), np.inf).min(axis=1)
+    lane, pressed = np.where(np.isfinite(lane), lane, 10.0), np.where(np.isfinite(pressed), pressed, 10.0)
+    attacks_right = {side: tr.attacks_right(side) for side in np.unique(team)}        # once per team, not per pass
+    sign = np.array([1.0 if attacks_right[side][k] else -1.0 for side, k in zip(team, f)])
+    forward = np.clip(line[:, 0] / np.maximum(length, 1e-6) * sign, 0, None)
+    difficulty = 100 * (0.6 * np.clip(1 - lane / 5, 0, 1) + 0.2 * np.clip(1 - pressed / 5, 0, 1) + 0.2 * forward)
+    receiver = np.array([r if isinstance(r, str) else None for r in passes["To"]], dtype=object)
+    seconds = np.maximum((passes["End Time [s]"] - passes["Start Time [s]"]).to_numpy(float), 0.04)
+    return pd.DataFrame({"time": passes["Start Time [s]"].to_numpy(), "team": team, "player": passes["From"].to_numpy(),
+                         "receiver": receiver, "distance": length, "completed": [isinstance(r, str) for r in receiver],
+                         "lane": lane, "difficulty": np.round(difficulty).astype(int), "speed_kmh": length / seconds * 3.6})
 
 
 def shot_speeds(tr: TrackingData, events: pd.DataFrame) -> pd.Series:

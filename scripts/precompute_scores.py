@@ -1,5 +1,5 @@
 """
-Score every synthetic match once and save the tables next to them (data/synthetic/scored.pkl).
+Score every synthetic match once and save the tables next to them (data/synthetic/scored.pkl, xt.pkl).
 
     python scripts/precompute_scores.py
 
@@ -18,6 +18,8 @@ if __name__ == "__main__":
     if not games:
         sys.exit("No games in data/synthetic: run scripts/generate_synthetic_league.py first.")
     signature = pipeline.games_signature(games)
-    pipeline.save_scored(signature, pipeline.score_all(pipeline.learn_xt(games), games,
-                                                       progress=lambda i, n: print(f"Scored {i}/{n}")))
-    print(f"Saved {pipeline.SCORED_FILE} for {len(games)} games, pipeline version {pipeline.VERSION}")
+    xt = pipeline.learn_xt(games)
+    pipeline.save_scored(signature, xt, pipeline.XT_FILE)
+    pipeline.save_scored(signature, pipeline.score_all(xt, games, progress=lambda i, n: print(f"Scored {i}/{n}")))
+    print(f"Saved {pipeline.SCORED_FILE} and {pipeline.XT_FILE.name} for {len(games)} games, "
+          f"pipeline version {pipeline.VERSION}")

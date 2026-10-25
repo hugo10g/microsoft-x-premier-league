@@ -49,6 +49,7 @@ Run:  streamlit run app.py
 import copy
 import html
 import json
+import threading
 
 import numpy as np
 import pandas as pd
@@ -109,18 +110,21 @@ def games_signature() -> tuple:
 
 @st.cache_data(show_spinner="Learning xT from the league's passes, carries and shots...")
 def xt_grid(signature: tuple) -> np.ndarray:
-    return pipeline.learn_xt([GAMES[name] for name, _ in signature if name in GAMES])
+    saved = pipeline.load_scored(signature, pipeline.XT_FILE)       # from scripts/precompute_scores.py
+    return saved if saved is not None else pipeline.learn_xt([GAMES[name] for name, _ in signature if name in GAMES])
 
 
-@st.cache_data(show_spinner=False, persist="disk")
+@st.cache_resource(show_spinner="Loading the league...")
 def load_global_metrics(signature: tuple) -> dict[str, pd.DataFrame]:
     """Every game through the pillars, concatenated (core.pipeline.score_all).
 
     Event-level tables (decoys, pressing, transitions) plus per-player profiles, all
-    with game, player and uid columns. Persisted to disk: this is the slow part
-    (about 5 s a game), and it only reruns when a game file changes. Tables saved by
-    scripts/precompute_scores.py for this exact signature load instead, so a fresh
-    container starts in seconds.
+    with game, player and uid columns. Held once per server as a shared resource:
+    st.cache_data would unpickle a fresh ~400 MB copy on every click, which is what
+    made the app slow. Callers only read and filter these tables, never change them.
+    Tables saved by scripts/precompute_scores.py for this exact signature load
+    instead of scoring every match (about 5 s a game), so a fresh container starts
+    in seconds.
     """
     if (saved := pipeline.load_scored(signature)) is not None:
         return saved
@@ -262,6 +266,18 @@ def scout_agent(signature: tuple) -> OffBallAgent:
     """One agent per dataset, shared by all sessions. Each session keeps its own chat history."""
     pool, _, _ = value_models(signature, SCOUT_POOL_MINUTES, False)
     return OffBallAgent(pool)
+
+
+@st.cache_resource(show_spinner=False)
+def warm_up(signature: tuple) -> threading.Thread:
+    """Fill the league-wide caches in the background, once per server, while the first visitor
+    watches Live Match, so Player Profile, Value Finder and Model Check don't wait for model training."""
+    def work():
+        value_models(signature, SCOUT_POOL_MINUTES, False)
+        per_match(signature)
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    return thread
 
 
 def match_label(game: str) -> str:
@@ -419,6 +435,7 @@ signature = games_signature()
 xt = xt_grid(signature)
 global_data = load_global_metrics(signature)
 names = league_names(signature)
+warm_up(signature)
 # Page -> what it covers. Match pages follow the sidebar's match; the rest pool the league.
 PAGES = {"Live Match": "This match · as it happens", "Tactical Playback": "This match · the 2D pitch", "Match Leaderboards": "This match · rankings",
          "Match Report": "This match · fact-checked AI report", "Off-Ball Index": "League · composite index",

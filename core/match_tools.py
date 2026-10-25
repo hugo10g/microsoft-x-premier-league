@@ -163,7 +163,8 @@ def _table(tables: dict[str, pd.DataFrame] | None, key: str) -> pd.DataFrame | N
     table = (tables or {}).get(key)
     if table is None or table.empty or not set(TABLE_COLUMNS[key]) <= set(table.columns):
         return None
-    table = table.assign(side=table["player"].astype(str).str.split("_").str[0])
+    sides = {player: str(player).split("_")[0] for player in table["player"].unique()}     # few ids, many rows
+    table = table.assign(side=table["player"].map(sides))
     if key == "scanning":       # receptions with too little head data count for nothing
         table = table[table["n_scans"].notna()
                       & (table["scan_rate"].notna() if "scan_rate" in table else True)]

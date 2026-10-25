@@ -37,6 +37,7 @@ RUN_TYPE_COLUMNS = {"Run in Behind": "runs_in_behind_p90", "Pulling Wide": "pull
 
 
 SCORED_FILE = GAMES_DIR / "scored.pkl"   # score_all's tables, saved by scripts/precompute_scores.py
+XT_FILE = GAMES_DIR / "xt.pkl"           # learn_xt's grid, saved alongside
 
 
 def games_signature(games: list[Path]) -> tuple:
@@ -49,12 +50,12 @@ def games_signature(games: list[Path]) -> tuple:
         (game.name, int(max(f.stat().st_mtime for f in game.glob("*.csv")))) for game in games)
 
 
-def save_scored(signature: tuple, tables: dict[str, pd.DataFrame], path: Path = SCORED_FILE) -> None:
+def save_scored(signature: tuple, tables: dict[str, pd.DataFrame] | np.ndarray, path: Path = SCORED_FILE) -> None:
     pd.to_pickle((signature, tables), path)
 
 
-def load_scored(signature: tuple, path: Path = SCORED_FILE) -> dict[str, pd.DataFrame] | None:
-    """The saved score_all tables if they were made for `signature`, else None (score afresh)."""
+def load_scored(signature: tuple, path: Path = SCORED_FILE) -> dict[str, pd.DataFrame] | np.ndarray | None:
+    """The saved score_all tables (or, at XT_FILE, the xT grid) if made for `signature`, else None."""
     if not path.exists():
         return None
     saved, tables = pd.read_pickle(path)
