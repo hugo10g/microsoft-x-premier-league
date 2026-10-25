@@ -19,19 +19,6 @@ It ingests a match event by event and turns 25 Hz tracking into off-ball metrics
 
 **Microsoft and Azure technology:** Microsoft Foundry (`gpt-4.1-mini`), Microsoft Agent Framework, Azure Container Apps and Azure Container Registry.
 
-## Demo video
-
-Under 2 minutes, showing the working app, with no music, real logos or club names. Upload it to YouTube or Vimeo as public or unlisted.
-
-Show these in order:
-1. Live Match playing.
-2. The personal view: a mode, a player to follow and a language.
-3. A goal on the Tactical Playback pitch.
-4. The overlay feed.
-5. A Match Report with its Agent trace.
-6. The Player Profile price breakdown.
-7. Model Check.
-
 ## Testing
 
 - **Live app:** https://off-ball-value.livelyforest-7e8a1161.norwayeast.azurecontainerapps.io. No login needed.
@@ -41,4 +28,4 @@ Show these in order:
   3. **Tactical Playback** → a highlight clip.
   4. **Match Report** → Generate report (open the Agent trace).
   5. **Model Check.**
-- **Code (public):** https://github.com/hugo10g/microsoft-x-premier-league. The README covers setup, the architecture and how every number is calculated.
+- **Code (public):** https://github.com/hugo10g/microsoft-x-premier-league.
